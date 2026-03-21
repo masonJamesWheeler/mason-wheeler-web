@@ -20,7 +20,6 @@ output-name = "mason-wheeler-web"
 site-root = "target/site"
 site-pkg-dir = "pkg"
 tailwind-input-file = "app/style/app.css"
-tailwind-config-file = "app/tailwind.config.js"
 assets-dir = "app/public"
 site-addr = "127.0.0.1:3000"
 reload-port = 3001
