@@ -1,6 +1,6 @@
 #![allow(unused)]
 use leptos::prelude::*;
-use mason_wheeler_shared::{MaintenanceMessage, MaintenanceRequest};
+use mason_wheeler_shared::{MaintenanceMessage, MaintenanceRequest, PaginatedResponse};
 
 #[allow(unused)]
 #[component]
@@ -11,18 +11,74 @@ pub fn AdminMaintenance() -> impl IntoView {
     let (messages, set_messages) = signal::<Vec<MaintenanceMessage>>(vec![]);
     let (new_message, set_new_message) = signal(String::new());
     let (sending_message, set_sending_message) = signal(false);
+    let (search, set_search) = signal(String::new());
+    let (search_input, set_search_input) = signal(String::new());
+    let (status_filter, set_status_filter) = signal(String::from("all"));
+    let (current_page, set_current_page) = signal(1u64);
+    let (total_items, set_total_items) = signal(0u64);
+    let per_page = 20u64;
 
-    #[cfg(feature = "hydrate")]
-    {
-        leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/maintenance").send().await {
-                if let Ok(data) = resp.json::<Vec<MaintenanceRequest>>().await {
-                    set_requests.set(data);
+    let fetch_requests = move || {
+        #[cfg(feature = "hydrate")]
+        {
+            let search_val = search.get();
+            let status_val = status_filter.get();
+            let page_val = current_page.get();
+            set_loading.set(true);
+            leptos::task::spawn_local(async move {
+                let mut url = format!("/api/maintenance?page={}&per_page={}", page_val, per_page);
+                if !search_val.is_empty() {
+                    url.push_str(&format!("&search={}", search_val.replace('%', "%25").replace('&', "%26").replace('=', "%3D").replace(' ', "%20").replace('+', "%2B")));
                 }
-            }
-            set_loading.set(false);
-        });
-    }
+                if status_val != "all" {
+                    url.push_str(&format!("&status={}", status_val));
+                }
+                if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                    if let Ok(data) = resp.json::<PaginatedResponse<MaintenanceRequest>>().await {
+                        set_total_items.set(data.total);
+                        set_requests.set(data.items);
+                    }
+                }
+                set_loading.set(false);
+            });
+        }
+    };
+
+    // Refetch when search, filter, or page changes
+    Effect::new(move |_| {
+        let _ = search.get();
+        let _ = status_filter.get();
+        let _ = current_page.get();
+        fetch_requests();
+    });
+
+    // Debounced search
+    let on_search_input = move |ev: leptos::ev::Event| {
+        let val = event_target_value(&ev);
+        set_search_input.set(val.clone());
+        set_current_page.set(1);
+        #[cfg(feature = "hydrate")]
+        {
+            let val = val.clone();
+            leptos::task::spawn_local(async move {
+                gloo_timers::future::TimeoutFuture::new(300).await;
+                if search_input.get() == val {
+                    set_search.set(val);
+                }
+            });
+        }
+    };
+
+    let on_status_change = move |ev: leptos::ev::Event| {
+        let val = event_target_value(&ev);
+        set_status_filter.set(val);
+        set_current_page.set(1);
+    };
+
+    let total_pages = move || {
+        let t = total_items.get();
+        if t == 0 { 1 } else { (t + per_page - 1) / per_page }
+    };
 
     let update_status = move |id: String, new_status: String| {
         #[cfg(feature = "hydrate")]
@@ -111,10 +167,32 @@ pub fn AdminMaintenance() -> impl IntoView {
             <h1 class="text-3xl font-bold tracking-tight text-stone-900 mb-1">"Maintenance Requests"</h1>
             <p class="text-stone-500 mb-8">"Review and manage tenant maintenance requests"</p>
 
+            // Search and filter controls
+            <div class="flex flex-col md:flex-row gap-3 mb-6">
+                <input
+                    type="text"
+                    class="input w-full md:w-80"
+                    placeholder="Search by title..."
+                    on:input=on_search_input
+                    prop:value=move || search_input.get()
+                />
+                <select
+                    class="input w-full md:w-48"
+                    on:change=on_status_change
+                    prop:value=move || status_filter.get()
+                >
+                    <option value="all">"All Statuses"</option>
+                    <option value="submitted">"Submitted"</option>
+                    <option value="in_progress">"In Progress"</option>
+                    <option value="completed">"Completed"</option>
+                </select>
+            </div>
+
             <Show
                 when=move || !loading.get()
                 fallback=|| view! {
                     <div class="card text-center py-12">
+                        <div class="w-8 h-8 border-2 border-stone-200 border-t-amber-500 rounded-full animate-spin mx-auto mb-4"></div>
                         <p class="text-stone-400 text-sm">"Loading requests..."</p>
                     </div>
                 }
@@ -241,6 +319,29 @@ pub fn AdminMaintenance() -> impl IntoView {
                                 </div>
                             }
                         }).collect_view()}
+                    </div>
+
+                    // Pagination controls
+                    <div class="flex items-center justify-between mt-6">
+                        <p class="text-sm text-stone-400">
+                            {move || format!("Showing page {} of {}", current_page.get(), total_pages())}
+                        </p>
+                        <div class="flex gap-2">
+                            <button
+                                class="btn-secondary text-sm"
+                                disabled=move || current_page.get() <= 1
+                                on:click=move |_| set_current_page.update(|p| *p = (*p).saturating_sub(1).max(1))
+                            >
+                                "Previous"
+                            </button>
+                            <button
+                                class="btn-secondary text-sm"
+                                disabled=move || current_page.get() >= total_pages()
+                                on:click=move |_| set_current_page.update(|p| *p += 1)
+                            >
+                                "Next"
+                            </button>
+                        </div>
                     </div>
                 </Show>
             </Show>

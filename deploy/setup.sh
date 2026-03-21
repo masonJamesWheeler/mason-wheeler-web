@@ -54,6 +54,24 @@ EOF
 chmod 600 "${APP_DIR}/.env"
 echo "Wrote secrets to ${APP_DIR}/.env"
 
+# Install sqlite3 if not present
+if ! command -v sqlite3 &>/dev/null; then
+    echo "Installing sqlite3..."
+    sudo apt-get update -y
+    sudo apt-get install -y sqlite3
+else
+    echo "sqlite3 already installed."
+fi
+
+# Install backup script and crontab
+echo "Installing backup script..."
+cp "${SCRIPT_DIR}/backup.sh" "${APP_DIR}/backup.sh"
+chmod +x "${APP_DIR}/backup.sh"
+mkdir -p "${DATA_DIR}/backups"
+
+echo "Installing backup crontab..."
+crontab "${SCRIPT_DIR}/crontab.txt"
+
 # Install systemd service
 echo "Installing systemd service..."
 sudo cp "${SCRIPT_DIR}/mason-wheeler.service" /etc/systemd/system/mason-wheeler-app.service

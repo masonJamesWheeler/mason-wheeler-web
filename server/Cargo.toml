@@ -23,11 +23,17 @@ bcrypt = "0.16"
 # Encoding
 base64 = "0.22"
 
+# Input sanitization
+regex = "1"
+
 # Payments
 async-stripe = { version = "0.39", features = ["runtime-tokio-hyper-rustls", "checkout", "billing", "webhook-events"] }
 
 # Email
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport"] }
+
+# PDF generation
+genpdf = "0.2"
 
 # Web
 axum = { version = "0.7", features = ["macros", "multipart"] }

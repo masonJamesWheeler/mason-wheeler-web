@@ -29,5 +29,17 @@ pub fn HomePage() -> impl IntoView {
                 </svg>
             </a>
         </div>
+
+        // Screening disclosure (required by WA state law)
+        <div class="max-w-3xl mx-auto px-6 pb-12">
+            <div class="border-t border-stone-200 pt-8">
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-stone-400 mb-3">"Tenant Screening Disclosure"</h2>
+                <p class="text-sm text-stone-500 leading-relaxed">
+                    "Per Washington State law (RCW 59.18.257), this property does not accept reusable tenant screening reports. "
+                    "All applicants are screened through TransUnion SmartMove. Screening costs may be passed to the applicant. "
+                    "Screening criteria are applied consistently to all applicants in accordance with Seattle\u{2019}s First-in-Time rule."
+                </p>
+            </div>
+        </div>
     }
 }

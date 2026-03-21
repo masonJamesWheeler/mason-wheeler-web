@@ -5,17 +5,42 @@ pub fn LoginPage() -> impl IntoView {
     let (email, set_email) = signal(String::new());
     let (password, set_password) = signal(String::new());
     let (error, set_error) = signal::<Option<String>>(None);
+    let (email_error, set_email_error) = signal::<Option<String>>(None);
+    let (password_error, set_password_error) = signal::<Option<String>>(None);
     let (loading, set_loading) = signal(false);
 
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
-        set_loading.set(true);
         set_error.set(None);
+        set_email_error.set(None);
+        set_password_error.set(None);
+
+        // Client-side validation
+        let email_val = email.get();
+        let password_val = password.get();
+        let mut has_error = false;
+
+        if email_val.trim().is_empty() {
+            set_email_error.set(Some("Email is required".to_string()));
+            has_error = true;
+        } else if !email_val.contains('@') {
+            set_email_error.set(Some("Please enter a valid email address".to_string()));
+            has_error = true;
+        }
+
+        if password_val.is_empty() {
+            set_password_error.set(Some("Password is required".to_string()));
+            has_error = true;
+        }
+
+        if has_error {
+            return;
+        }
+
+        set_loading.set(true);
 
         #[cfg(feature = "hydrate")]
         {
-            let email_val = email.get();
-            let password_val = password.get();
 
             leptos::task::spawn_local(async move {
                 let body = serde_json::json!({
@@ -92,11 +117,17 @@ pub fn LoginPage() -> impl IntoView {
                             type="email"
                             required=true
                             autocomplete="email"
-                            class="input"
+                            class=move || if email_error.get().is_some() { "input border-red-300" } else { "input" }
                             placeholder="you@example.com"
-                            on:input=move |ev| set_email.set(event_target_value(&ev))
+                            on:input=move |ev| {
+                                set_email.set(event_target_value(&ev));
+                                set_email_error.set(None);
+                            }
                             prop:value=move || email.get()
                         />
+                        <Show when=move || email_error.get().is_some()>
+                            <p class="text-xs text-red-500 mt-1 ml-1">{move || email_error.get().unwrap_or_default()}</p>
+                        </Show>
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-stone-500 mb-1.5 ml-1" for="password">"Password"</label>
@@ -105,11 +136,17 @@ pub fn LoginPage() -> impl IntoView {
                             type="password"
                             required=true
                             autocomplete="current-password"
-                            class="input"
+                            class=move || if password_error.get().is_some() { "input border-red-300" } else { "input" }
                             placeholder="Enter your password"
-                            on:input=move |ev| set_password.set(event_target_value(&ev))
+                            on:input=move |ev| {
+                                set_password.set(event_target_value(&ev));
+                                set_password_error.set(None);
+                            }
                             prop:value=move || password.get()
                         />
+                        <Show when=move || password_error.get().is_some()>
+                            <p class="text-xs text-red-500 mt-1 ml-1">{move || password_error.get().unwrap_or_default()}</p>
+                        </Show>
                     </div>
                     <button
                         type="submit"

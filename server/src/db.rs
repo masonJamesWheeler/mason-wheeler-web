@@ -29,6 +29,7 @@ pub fn init_db() {
     std::fs::create_dir_all("data/signatures").expect("Failed to create data/signatures directory");
 
     create_tables(&conn);
+    run_migrations(&conn);
     seed_default_landlord(&conn);
 
     DB.set(Mutex::new(conn))
@@ -51,6 +52,7 @@ fn create_tables(conn: &Connection) {
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL REFERENCES users(id),
             expires_at TEXT NOT NULL,
+            last_used TEXT NOT NULL DEFAULT (datetime('now')),
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -187,6 +189,19 @@ fn create_tables(conn: &Connection) {
         ",
     )
     .expect("Failed to create tables");
+}
+
+fn run_migrations(conn: &Connection) {
+    // Add last_used column to sessions if it doesn't exist
+    let has_last_used: bool = conn
+        .prepare("SELECT last_used FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_last_used {
+        conn.execute_batch(
+            "ALTER TABLE sessions ADD COLUMN last_used TEXT NOT NULL DEFAULT (datetime('now'));",
+        )
+        .ok();
+    }
 }
 
 fn seed_default_landlord(conn: &Connection) {

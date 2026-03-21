@@ -1,0 +1,2 @@
+# Daily backup at 3am UTC
+0 3 * * * /home/azureuser/app/backup.sh >> /home/azureuser/app/data/backup.log 2>&1

@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedResponse<T> {
+    pub items: Vec<T>,
+    pub total: u64,
+    pub page: u64,
+    pub per_page: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Property {
     pub id: String,
     pub address: String,
@@ -214,4 +222,35 @@ pub struct LandlordContactInfo {
     pub email: String,
     pub emergency_contact: Option<String>,
     pub emergency_phone: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Admin Reports
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevenueMonth {
+    pub month: String, // "2026-03"
+    pub total: f64,
+    pub rent: f64,
+    pub utility: f64,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintenanceStats {
+    pub total: u32,
+    pub submitted: u32,
+    pub in_progress: u32,
+    pub completed: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverviewReport {
+    pub total_collected: f64,
+    pub total_outstanding: f64,
+    pub total_payments: u32,
+    pub active_tenants: u32,
+    pub maintenance_stats: MaintenanceStats,
+    pub monthly_revenue: Vec<RevenueMonth>,
 }

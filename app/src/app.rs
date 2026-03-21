@@ -51,6 +51,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/admin/documents") view=pages::admin::documents::AdminDocuments />
                     <Route path=path!("/admin/maintenance") view=pages::admin::maintenance::AdminMaintenance />
                     <Route path=path!("/admin/tenants") view=pages::admin::tenants::AdminTenants />
+                    <Route path=path!("/admin/reports") view=pages::admin::reports::AdminReports />
                 </Routes>
             </main>
             <Footer />

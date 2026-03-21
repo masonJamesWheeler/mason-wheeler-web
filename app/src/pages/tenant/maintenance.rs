@@ -11,6 +11,8 @@ pub fn TenantMaintenance() -> impl IntoView {
     let (title, set_title) = signal(String::new());
     let (description, set_description) = signal(String::new());
     let (submitting, set_submitting) = signal(false);
+    let (title_error, set_title_error) = signal::<Option<String>>(None);
+    let (desc_error, set_desc_error) = signal::<Option<String>>(None);
     let (expanded_id, set_expanded_id) = signal::<Option<String>>(None);
     let (messages, set_messages) = signal::<Vec<MaintenanceMessage>>(vec![]);
     let (new_message, set_new_message) = signal(String::new());
@@ -30,12 +32,30 @@ pub fn TenantMaintenance() -> impl IntoView {
 
     let handle_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
+        set_title_error.set(None);
+        set_desc_error.set(None);
+
+        // Client-side validation
+        let title_val = title.get();
+        let desc_val = description.get();
+        let mut has_error = false;
+
+        if title_val.trim().is_empty() {
+            set_title_error.set(Some("Title is required".to_string()));
+            has_error = true;
+        }
+        if desc_val.trim().is_empty() {
+            set_desc_error.set(Some("Description is required".to_string()));
+            has_error = true;
+        }
+        if has_error {
+            return;
+        }
+
         set_submitting.set(true);
 
         #[cfg(feature = "hydrate")]
         {
-            let title_val = title.get();
-            let desc_val = description.get();
 
             leptos::task::spawn_local(async move {
                 let body = serde_json::json!({
@@ -146,22 +166,34 @@ pub fn TenantMaintenance() -> impl IntoView {
                             <input
                                 type="text"
                                 required=true
-                                class="input"
+                                class=move || if title_error.get().is_some() { "input border-red-300" } else { "input" }
                                 placeholder="e.g., Leaky faucet in kitchen"
-                                on:input=move |ev| set_title.set(event_target_value(&ev))
+                                on:input=move |ev| {
+                                    set_title.set(event_target_value(&ev));
+                                    set_title_error.set(None);
+                                }
                                 prop:value=move || title.get()
                             />
+                            <Show when=move || title_error.get().is_some()>
+                                <p class="text-xs text-red-500 mt-1">{move || title_error.get().unwrap_or_default()}</p>
+                            </Show>
                         </div>
                         <div>
                             <label class="stat-label block text-sm font-medium text-stone-600 mb-1.5">"Description"</label>
                             <textarea
                                 required=true
                                 rows="4"
-                                class="input"
+                                class=move || if desc_error.get().is_some() { "input border-red-300" } else { "input" }
                                 placeholder="Describe the issue in detail..."
-                                on:input=move |ev| set_description.set(event_target_value(&ev))
+                                on:input=move |ev| {
+                                    set_description.set(event_target_value(&ev));
+                                    set_desc_error.set(None);
+                                }
                                 prop:value=move || description.get()
                             />
+                            <Show when=move || desc_error.get().is_some()>
+                                <p class="text-xs text-red-500 mt-1">{move || desc_error.get().unwrap_or_default()}</p>
+                            </Show>
                         </div>
                         <div class="flex items-center gap-3 pt-2">
                             <button

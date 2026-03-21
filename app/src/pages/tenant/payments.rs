@@ -1,6 +1,6 @@
 #![allow(unused)]
 use leptos::prelude::*;
-use mason_wheeler_shared::{Payment, UtilityCharge};
+use mason_wheeler_shared::{PaginatedResponse, Payment, UtilityCharge};
 
 #[allow(unused)]
 #[component]
@@ -8,23 +8,74 @@ pub fn TenantPayments() -> impl IntoView {
     let (payments, set_payments) = signal::<Vec<Payment>>(vec![]);
     let (utilities, set_utilities) = signal::<Vec<UtilityCharge>>(vec![]);
     let (loading, set_loading) = signal(true);
+    let (search, set_search) = signal(String::new());
+    let (search_input, set_search_input) = signal(String::new());
+    let (current_page, set_current_page) = signal(1u64);
+    let (total_items, set_total_items) = signal(0u64);
+    let per_page = 20u64;
 
+    let fetch_payments = move || {
+        #[cfg(feature = "hydrate")]
+        {
+            let search_val = search.get();
+            let page_val = current_page.get();
+            set_loading.set(true);
+            leptos::task::spawn_local(async move {
+                let mut url = format!("/api/tenant/payments?page={}&per_page={}", page_val, per_page);
+                if !search_val.is_empty() {
+                    url.push_str(&format!("&search={}", search_val.replace('%', "%25").replace('&', "%26").replace('=', "%3D").replace(' ', "%20").replace('+', "%2B")));
+                }
+                if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                    if let Ok(data) = resp.json::<PaginatedResponse<Payment>>().await {
+                        set_total_items.set(data.total);
+                        set_payments.set(data.items);
+                    }
+                }
+                set_loading.set(false);
+            });
+        }
+    };
+
+    // Initial fetch of payments and utilities
     #[cfg(feature = "hydrate")]
     {
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/tenant/payments").send().await {
-                if let Ok(data) = resp.json::<Vec<Payment>>().await {
-                    set_payments.set(data);
-                }
-            }
             if let Ok(resp) = gloo_net::http::Request::get("/api/tenant/utilities").send().await {
                 if let Ok(data) = resp.json::<Vec<UtilityCharge>>().await {
                     set_utilities.set(data);
                 }
             }
-            set_loading.set(false);
         });
     }
+
+    // Refetch when search or page changes
+    Effect::new(move |_| {
+        let _ = search.get();
+        let _ = current_page.get();
+        fetch_payments();
+    });
+
+    // Debounced search: update `search` signal 300ms after input stops
+    let on_search_input = move |ev: leptos::ev::Event| {
+        let val = event_target_value(&ev);
+        set_search_input.set(val.clone());
+        set_current_page.set(1);
+        #[cfg(feature = "hydrate")]
+        {
+            let val = val.clone();
+            leptos::task::spawn_local(async move {
+                gloo_timers::future::TimeoutFuture::new(300).await;
+                if search_input.get() == val {
+                    set_search.set(val);
+                }
+            });
+        }
+    };
+
+    let total_pages = move || {
+        let t = total_items.get();
+        if t == 0 { 1 } else { (t + per_page - 1) / per_page }
+    };
 
     let handle_pay_rent = move |_| {
         #[cfg(feature = "hydrate")]
@@ -77,6 +128,29 @@ pub fn TenantPayments() -> impl IntoView {
                             let desc = charge.description.clone();
                             let amount = charge.amount;
                             let due = charge.due_date.clone();
+                            let charge_id = charge.id.clone();
+                            let handle_pay_utility = move |_| {
+                                let charge_id = charge_id.clone();
+                                #[cfg(feature = "hydrate")]
+                                {
+                                    leptos::task::spawn_local(async move {
+                                        if let Ok(resp) = gloo_net::http::Request::post("/api/payments/create-utility-checkout")
+                                            .json(&serde_json::json!({ "utility_charge_id": charge_id }))
+                                            .unwrap()
+                                            .send()
+                                            .await
+                                        {
+                                            if let Ok(data) = resp.json::<serde_json::Value>().await {
+                                                if let Some(url) = data.get("url").and_then(|u| u.as_str()) {
+                                                    if let Some(window) = web_sys::window() {
+                                                        let _ = window.location().set_href(url);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            };
                             view! {
                                 <div class="card card-hover flex items-center justify-between p-5">
                                     <div class="flex items-center gap-4">
@@ -92,7 +166,7 @@ pub fn TenantPayments() -> impl IntoView {
                                     </div>
                                     <div class="flex items-center gap-5">
                                         <p class="text-lg font-semibold text-stone-900 tabular-nums">{format!("${:.2}", amount)}</p>
-                                        <button class="btn-primary text-sm">
+                                        <button class="btn-primary text-sm" on:click=handle_pay_utility>
                                             "Pay Now"
                                         </button>
                                     </div>
@@ -105,6 +179,18 @@ pub fn TenantPayments() -> impl IntoView {
 
             // Payment history
             <h2 class="section-title mb-4">"Payment History"</h2>
+
+            // Search input
+            <div class="mb-4">
+                <input
+                    type="text"
+                    class="input w-full md:w-80"
+                    placeholder="Search by description..."
+                    on:input=on_search_input
+                    prop:value=move || search_input.get()
+                />
+            </div>
+
             <Show
                 when=move || !loading.get()
                 fallback=|| view! {
@@ -167,6 +253,29 @@ pub fn TenantPayments() -> impl IntoView {
                                 }).collect_view()}
                             </tbody>
                         </table>
+                    </div>
+
+                    // Pagination controls
+                    <div class="flex items-center justify-between mt-4">
+                        <p class="text-sm text-stone-400">
+                            {move || format!("Showing page {} of {}", current_page.get(), total_pages())}
+                        </p>
+                        <div class="flex gap-2">
+                            <button
+                                class="btn-secondary text-sm"
+                                disabled=move || current_page.get() <= 1
+                                on:click=move |_| set_current_page.update(|p| *p = (*p).saturating_sub(1).max(1))
+                            >
+                                "Previous"
+                            </button>
+                            <button
+                                class="btn-secondary text-sm"
+                                disabled=move || current_page.get() >= total_pages()
+                                on:click=move |_| set_current_page.update(|p| *p += 1)
+                            >
+                                "Next"
+                            </button>
+                        </div>
                     </div>
                 </Show>
             </Show>

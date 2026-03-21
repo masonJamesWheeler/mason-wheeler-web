@@ -90,6 +90,24 @@ jobs:
           target: /home/azureuser/app/_staging_site
           strip_components: 1
 
+      - name: Upload backup script to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "deploy/backup.sh"
+          target: /home/azureuser/app
+          strip_components: 1
+
+      - name: Make backup script executable
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: chmod +x /home/azureuser/app/backup.sh
+
       - name: Deploy and restart
         uses: appleboy/ssh-action@v1.0.3
         with:

@@ -10,6 +10,7 @@ pub struct Claims {
     pub sub: String,
     pub email: String,
     pub role: String,
+    pub session_id: Option<String>,
     pub exp: usize,
 }
 
@@ -22,6 +23,9 @@ pub fn generate_token(
     email: &str,
     role: &str,
 ) -> Result<String, jsonwebtoken::errors::Error> {
+    // Create a session in the database and embed its ID in the token
+    let session_id = create_session(user_id);
+
     let expiration = Utc::now()
         .checked_add_signed(chrono::Duration::days(30))
         .expect("valid timestamp")
@@ -31,6 +35,7 @@ pub fn generate_token(
         sub: user_id.to_string(),
         email: email.to_string(),
         role: role.to_string(),
+        session_id: Some(session_id),
         exp: expiration,
     };
 
@@ -49,7 +54,41 @@ pub fn validate_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::default(),
     )?;
-    Ok(token_data.claims)
+
+    let claims = token_data.claims;
+
+    // Check session inactivity (24-hour timeout)
+    if let Some(ref session_id) = claims.session_id {
+        let db = get_db();
+        let now = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let inactivity_cutoff = (Utc::now() - chrono::Duration::hours(24))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+
+        // Check if session exists and was used within the last 24 hours
+        let session_valid = db
+            .query_row(
+                "SELECT 1 FROM sessions WHERE id = ?1 AND last_used > ?2",
+                rusqlite::params![session_id, inactivity_cutoff],
+                |_| Ok(()),
+            )
+            .is_ok();
+
+        if !session_valid {
+            return Err(jsonwebtoken::errors::Error::from(
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature,
+            ));
+        }
+
+        // Update last_used timestamp
+        db.execute(
+            "UPDATE sessions SET last_used = ?1 WHERE id = ?2",
+            rusqlite::params![now, session_id],
+        )
+        .ok();
+    }
+
+    Ok(claims)
 }
 
 pub fn hash_password(password: &str) -> String {
@@ -68,10 +107,12 @@ pub fn create_session(user_id: &str) -> String {
         .format("%Y-%m-%d %H:%M:%S")
         .to_string();
 
+    let now = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
     let db = get_db();
     db.execute(
-        "INSERT INTO sessions (id, user_id, expires_at) VALUES (?1, ?2, ?3)",
-        rusqlite::params![session_id, user_id, expires_at],
+        "INSERT INTO sessions (id, user_id, expires_at, last_used) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![session_id, user_id, expires_at, now],
     )
     .expect("Failed to create session");
 
@@ -82,12 +123,17 @@ pub fn validate_session(session_id: &str) -> Option<(String, String, String, Str
     let db = get_db();
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-    db.query_row(
+    // Check session exists, hasn't expired, and was used within the last 24 hours
+    let inactivity_cutoff = (Utc::now() - chrono::Duration::hours(24))
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+
+    let result = db.query_row(
         "SELECT u.id, u.email, u.role, u.name
          FROM sessions s
          JOIN users u ON s.user_id = u.id
-         WHERE s.id = ?1 AND s.expires_at > ?2",
-        rusqlite::params![session_id, now],
+         WHERE s.id = ?1 AND s.expires_at > ?2 AND s.last_used > ?3",
+        rusqlite::params![session_id, now, inactivity_cutoff],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -97,7 +143,18 @@ pub fn validate_session(session_id: &str) -> Option<(String, String, String, Str
             ))
         },
     )
-    .ok()
+    .ok();
+
+    // Update last_used timestamp on successful validation
+    if result.is_some() {
+        db.execute(
+            "UPDATE sessions SET last_used = ?1 WHERE id = ?2",
+            rusqlite::params![now, session_id],
+        )
+        .ok();
+    }
+
+    result
 }
 
 pub fn auth_cookie(token: &str) -> String {

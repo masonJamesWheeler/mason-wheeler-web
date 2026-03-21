@@ -1,18 +1,128 @@
 use axum::{
     body::Bytes,
-    extract::{Multipart, Path},
+    extract::{Multipart, Path, Query},
     http::{header, header::SET_COOKIE, HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{delete, get, patch, post},
     Json, Router,
 };
 use mason_wheeler_shared::*;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::auth;
 use crate::db::get_db;
 use crate::email;
+use crate::pdf;
+
+// ---------------------------------------------------------------------------
+// Server start time (for uptime tracking)
+// ---------------------------------------------------------------------------
+
+static START_TIME: OnceLock<Instant> = OnceLock::new();
+
+fn server_start_time() -> &'static Instant {
+    START_TIME.get_or_init(Instant::now)
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting for login attempts
+// ---------------------------------------------------------------------------
+
+static LOGIN_ATTEMPTS: OnceLock<Mutex<HashMap<String, (u32, Instant)>>> = OnceLock::new();
+
+fn get_login_attempts() -> &'static Mutex<HashMap<String, (u32, Instant)>> {
+    LOGIN_ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+const MAX_LOGIN_ATTEMPTS: u32 = 5;
+const LOGIN_WINDOW_SECS: u64 = 15 * 60; // 15 minutes
+
+fn check_rate_limit(key: &str) -> Result<(), StatusCode> {
+    let mut attempts = get_login_attempts().lock().unwrap();
+    if let Some((count, first_attempt)) = attempts.get(key) {
+        if first_attempt.elapsed().as_secs() < LOGIN_WINDOW_SECS && *count >= MAX_LOGIN_ATTEMPTS {
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+    Ok(())
+}
+
+fn record_failed_login(key: &str) {
+    let mut attempts = get_login_attempts().lock().unwrap();
+    let entry = attempts.entry(key.to_string()).or_insert((0, Instant::now()));
+    if entry.1.elapsed().as_secs() >= LOGIN_WINDOW_SECS {
+        // Reset window
+        *entry = (1, Instant::now());
+    } else {
+        entry.0 += 1;
+    }
+}
+
+fn clear_login_attempts(key: &str) {
+    let mut attempts = get_login_attempts().lock().unwrap();
+    attempts.remove(key);
+}
+
+// ---------------------------------------------------------------------------
+// Input sanitization
+// ---------------------------------------------------------------------------
+
+fn sanitize_input(s: &str) -> String {
+    let trimmed = s.trim();
+    let re = Regex::new(r"<[^>]*>").unwrap();
+    re.replace_all(trimmed, "").to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Pagination query params
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct PaginationParams {
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+    pub search: Option<String>,
+    pub status: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Validation helper
+// ---------------------------------------------------------------------------
+
+fn validation_error(field: &str, message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": message,
+            "field": field,
+        })),
+    )
+}
+
+fn is_valid_email(email: &str) -> bool {
+    let trimmed = email.trim();
+    !trimmed.is_empty() && trimmed.contains('@') && trimmed.len() >= 3
+}
+
+fn is_valid_date(date: &str) -> bool {
+    // Accepts YYYY-MM-DD format
+    if date.len() != 10 {
+        return false;
+    }
+    let parts: Vec<&str> = date.split('-').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    parts[0].len() == 4
+        && parts[1].len() == 2
+        && parts[2].len() == 2
+        && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
+}
 
 // ---------------------------------------------------------------------------
 // Auth extractor helper
@@ -68,6 +178,7 @@ pub fn api_router() -> Router {
     let auth_routes = Router::new()
         .route("/login", post(login))
         .route("/logout", post(logout))
+        .route("/me", get(get_me))
         .route("/forgot-password", post(forgot_password))
         .route("/reset-password", post(reset_password));
 
@@ -80,11 +191,17 @@ pub fn api_router() -> Router {
         .route("/", get(admin_list_tenants).post(admin_create_tenant))
         .route("/{id}", delete(admin_delete_tenant));
 
+    let admin_report_routes = Router::new()
+        .route("/revenue", get(admin_report_revenue))
+        .route("/maintenance", get(admin_report_maintenance))
+        .route("/overview", get(admin_report_overview));
+
     let admin_routes = Router::new()
         .route("/dashboard", get(admin_dashboard))
         .route("/payments", get(admin_payments))
         .route("/utilities", post(admin_create_utility))
-        .nest("/tenants", admin_tenant_routes);
+        .nest("/tenants", admin_tenant_routes)
+        .nest("/reports", admin_report_routes);
 
     let maintenance_routes = Router::new()
         .route("/", get(list_maintenance).post(create_maintenance))
@@ -99,12 +216,19 @@ pub fn api_router() -> Router {
 
     let payment_routes = Router::new()
         .route("/create-checkout", post(create_checkout))
+        .route("/create-utility-checkout", post(create_utility_checkout))
         .route("/webhook", post(stripe_webhook));
 
     let disclosure_routes = crate::disclosures::disclosures_router();
 
     let signature_routes = Router::new()
         .route("/", post(create_signature));
+
+    let pdf_routes = Router::new()
+        .route("/move-in-checklist", get(pdf_move_in_checklist))
+        .route("/lead-paint-disclosure", get(pdf_lead_paint_disclosure))
+        .route("/deposit-receipt", get(pdf_deposit_receipt))
+        .route("/payment-receipt/{payment_id}", get(pdf_payment_receipt));
 
     Router::new()
         .nest("/auth", auth_routes)
@@ -115,13 +239,75 @@ pub fn api_router() -> Router {
         .nest("/payments", payment_routes)
         .nest("/disclosures", disclosure_routes)
         .nest("/signatures", signature_routes)
+        .nest("/pdf", pdf_routes)
+        .route("/health", get(health_check))
+}
+
+// ---------------------------------------------------------------------------
+// Health check handler
+// ---------------------------------------------------------------------------
+
+async fn health_check() -> impl IntoResponse {
+    // Initialize start time on first call (idempotent)
+    let uptime = server_start_time().elapsed().as_secs();
+
+    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "./data/app.db".to_string());
+
+    // Check DB is accessible and get file size
+    let db_size = match std::fs::metadata(&db_path) {
+        Ok(meta) => meta.len(),
+        Err(_) => 0,
+    };
+
+    // Verify we can actually query the DB
+    let db_ok = {
+        let db = get_db();
+        db.execute_batch("SELECT 1").is_ok()
+    };
+
+    let status = if db_ok { "ok" } else { "degraded" };
+    let code = if db_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (
+        code,
+        Json(serde_json::json!({
+            "status": status,
+            "uptime_seconds": uptime,
+            "db_size_bytes": db_size,
+            "db_path": db_path,
+        })),
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Auth handlers
 // ---------------------------------------------------------------------------
 
-async fn login(Json(body): Json<LoginRequest>) -> impl IntoResponse {
+async fn login(Json(body): Json<LoginRequest>) -> Result<impl IntoResponse, impl IntoResponse> {
+    // Validation
+    if body.email.trim().is_empty() {
+        return Err(validation_error("email", "Email is required"));
+    }
+    if !is_valid_email(&body.email) {
+        return Err(validation_error("email", "Invalid email format"));
+    }
+    if body.password.is_empty() {
+        return Err(validation_error("password", "Password is required"));
+    }
+
+    // Rate limiting check
+    let rate_limit_key = body.email.trim().to_lowercase();
+    check_rate_limit(&rate_limit_key).map_err(|status| {
+        (
+            status,
+            Json(serde_json::json!({"error": "Too many login attempts. Please try again in 15 minutes.", "field": "email"})),
+        )
+    })?;
+
     let db = get_db();
 
     let row = db.query_row(
@@ -140,14 +326,28 @@ async fn login(Json(body): Json<LoginRequest>) -> impl IntoResponse {
 
     let (id, email, password_hash, role, name) = match row {
         Ok(r) => r,
-        Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        Err(_) => {
+            record_failed_login(&rate_limit_key);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "Invalid credentials", "field": "email"})),
+            ))
+        }
     };
 
     if !auth::verify_password(&body.password, &password_hash) {
-        return Err(StatusCode::UNAUTHORIZED);
+        record_failed_login(&rate_limit_key);
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid credentials", "field": "password"})),
+        ));
     }
 
-    let token = auth::generate_token(&id, &email, &role).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Successful login — clear rate limit counter
+    clear_login_attempts(&rate_limit_key);
+
+    let token = auth::generate_token(&id, &email, &role)
+        .map_err(|_| validation_error("", "Internal server error"))?;
 
     let cookie = auth::auth_cookie(&token);
 
@@ -180,6 +380,16 @@ async fn logout() -> impl IntoResponse {
     (headers, StatusCode::OK)
 }
 
+async fn get_me(headers: HeaderMap) -> Result<Json<User>, StatusCode> {
+    let user = extract_user(&headers)?;
+    Ok(Json(User {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+    }))
+}
+
 // ---------------------------------------------------------------------------
 // Forgot / Reset password handlers
 // ---------------------------------------------------------------------------
@@ -189,7 +399,15 @@ struct ForgotPasswordRequest {
     email: String,
 }
 
-async fn forgot_password(Json(body): Json<ForgotPasswordRequest>) -> impl IntoResponse {
+async fn forgot_password(Json(body): Json<ForgotPasswordRequest>) -> Result<impl IntoResponse, impl IntoResponse> {
+    // Validation
+    if body.email.trim().is_empty() {
+        return Err(validation_error("email", "Email is required"));
+    }
+    if !is_valid_email(&body.email) {
+        return Err(validation_error("email", "Invalid email format"));
+    }
+
     // Always return 200 to avoid revealing whether an email exists
     let db = get_db();
 
@@ -235,7 +453,7 @@ async fn forgot_password(Json(body): Json<ForgotPasswordRequest>) -> impl IntoRe
         });
     }
 
-    StatusCode::OK
+    Ok(StatusCode::OK)
 }
 
 #[derive(Deserialize)]
@@ -244,7 +462,15 @@ struct ResetPasswordRequest {
     new_password: String,
 }
 
-async fn reset_password(Json(body): Json<ResetPasswordRequest>) -> impl IntoResponse {
+async fn reset_password(Json(body): Json<ResetPasswordRequest>) -> Result<impl IntoResponse, impl IntoResponse> {
+    // Validation
+    if body.token.trim().is_empty() {
+        return Err(validation_error("token", "Reset token is required"));
+    }
+    if body.new_password.len() < 8 {
+        return Err(validation_error("new_password", "Password must be at least 8 characters"));
+    }
+
     let db = get_db();
     let now = chrono::Utc::now()
         .format("%Y-%m-%d %H:%M:%S")
@@ -259,7 +485,7 @@ async fn reset_password(Json(body): Json<ResetPasswordRequest>) -> impl IntoResp
 
     let (token_id, user_id) = match token_row {
         Ok(r) => r,
-        Err(_) => return Err(StatusCode::BAD_REQUEST),
+        Err(_) => return Err(validation_error("token", "Invalid or expired reset token")),
     };
 
     // Hash the new password
@@ -270,7 +496,7 @@ async fn reset_password(Json(body): Json<ResetPasswordRequest>) -> impl IntoResp
         "UPDATE users SET password_hash = ?1 WHERE id = ?2",
         rusqlite::params![password_hash, user_id],
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| validation_error("", "Failed to update password"))?;
 
     // Mark token as used
     let _ = db.execute(
@@ -379,19 +605,51 @@ async fn tenant_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Sta
     }))
 }
 
-async fn tenant_payments(headers: HeaderMap) -> Result<Json<Vec<Payment>>, StatusCode> {
+async fn tenant_payments(
+    headers: HeaderMap,
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<PaginatedResponse<Payment>>, StatusCode> {
     let user = extract_user(&headers)?;
     let db = get_db();
 
-    let mut stmt = db
-        .prepare(
-            "SELECT id, user_id, amount, payment_type, description, stripe_payment_id, status, due_date, paid_date, created_at
-             FROM payments WHERE user_id = ?1 ORDER BY created_at DESC",
-        )
+    let page = params.page.unwrap_or(1).max(1);
+    let per_page = params.per_page.unwrap_or(20).min(100);
+    let offset = (page - 1) * per_page;
+
+    let mut where_clauses = vec!["user_id = ?1".to_string()];
+    let mut bind_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(user.id.clone())];
+
+    if let Some(ref search) = params.search {
+        if !search.is_empty() {
+            where_clauses.push(format!("description LIKE ?{}", bind_params.len() + 1));
+            bind_params.push(Box::new(format!("%{}%", search)));
+        }
+    }
+
+    let where_sql = where_clauses.join(" AND ");
+
+    let count_sql = format!("SELECT COUNT(*) FROM payments WHERE {}", where_sql);
+    let count_refs: Vec<&dyn rusqlite::types::ToSql> = bind_params.iter().map(|p| p.as_ref()).collect();
+    let total: u64 = db
+        .query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let query_sql = format!(
+        "SELECT id, user_id, amount, payment_type, description, stripe_payment_id, status, due_date, paid_date, created_at
+         FROM payments WHERE {} ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
+        where_sql,
+        bind_params.len() + 1,
+        bind_params.len() + 2,
+    );
+
+    let mut query_params = bind_params;
+    query_params.push(Box::new(per_page as i64));
+    query_params.push(Box::new(offset as i64));
+    let query_refs: Vec<&dyn rusqlite::types::ToSql> = query_params.iter().map(|p| p.as_ref()).collect();
+
+    let mut stmt = db.prepare(&query_sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let payments = stmt
-        .query_map(rusqlite::params![user.id], |row| {
+        .query_map(query_refs.as_slice(), |row| {
             Ok(Payment {
                 id: row.get(0)?,
                 user_id: row.get(1)?,
@@ -409,7 +667,12 @@ async fn tenant_payments(headers: HeaderMap) -> Result<Json<Vec<Payment>>, Statu
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
 
-    Ok(Json(payments))
+    Ok(Json(PaginatedResponse {
+        items: payments,
+        total,
+        page,
+        per_page,
+    }))
 }
 
 async fn tenant_utilities(headers: HeaderMap) -> Result<Json<Vec<UtilityCharge>>, StatusCode> {
@@ -552,7 +815,10 @@ async fn admin_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Stat
     }))
 }
 
-async fn admin_payments(headers: HeaderMap) -> Result<Json<Vec<Payment>>, StatusCode> {
+async fn admin_payments(
+    headers: HeaderMap,
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<PaginatedResponse<Payment>>, StatusCode> {
     let user = extract_user(&headers)?;
     if user.role != "landlord" {
         return Err(StatusCode::FORBIDDEN);
@@ -560,15 +826,55 @@ async fn admin_payments(headers: HeaderMap) -> Result<Json<Vec<Payment>>, Status
 
     let db = get_db();
 
-    let mut stmt = db
-        .prepare(
-            "SELECT id, user_id, amount, payment_type, description, stripe_payment_id, status, due_date, paid_date, created_at
-             FROM payments ORDER BY created_at DESC",
-        )
+    let page = params.page.unwrap_or(1).max(1);
+    let per_page = params.per_page.unwrap_or(20).min(100);
+    let offset = (page - 1) * per_page;
+
+    let mut where_clauses: Vec<String> = vec![];
+    let mut bind_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+
+    if let Some(ref search) = params.search {
+        if !search.is_empty() {
+            where_clauses.push(format!("description LIKE ?{}", bind_params.len() + 1));
+            bind_params.push(Box::new(format!("%{}%", search)));
+        }
+    }
+
+    if let Some(ref status) = params.status {
+        if !status.is_empty() && status != "all" {
+            where_clauses.push(format!("status = ?{}", bind_params.len() + 1));
+            bind_params.push(Box::new(status.clone()));
+        }
+    }
+
+    let where_sql = if where_clauses.is_empty() {
+        "1=1".to_string()
+    } else {
+        where_clauses.join(" AND ")
+    };
+
+    let count_sql = format!("SELECT COUNT(*) FROM payments WHERE {}", where_sql);
+    let count_refs: Vec<&dyn rusqlite::types::ToSql> = bind_params.iter().map(|p| p.as_ref()).collect();
+    let total: u64 = db
+        .query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let query_sql = format!(
+        "SELECT id, user_id, amount, payment_type, description, stripe_payment_id, status, due_date, paid_date, created_at
+         FROM payments WHERE {} ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
+        where_sql,
+        bind_params.len() + 1,
+        bind_params.len() + 2,
+    );
+
+    let mut query_params = bind_params;
+    query_params.push(Box::new(per_page as i64));
+    query_params.push(Box::new(offset as i64));
+    let query_refs: Vec<&dyn rusqlite::types::ToSql> = query_params.iter().map(|p| p.as_ref()).collect();
+
+    let mut stmt = db.prepare(&query_sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let payments = stmt
-        .query_map([], |row| {
+        .query_map(query_refs.as_slice(), |row| {
             Ok(Payment {
                 id: row.get(0)?,
                 user_id: row.get(1)?,
@@ -586,7 +892,12 @@ async fn admin_payments(headers: HeaderMap) -> Result<Json<Vec<Payment>>, Status
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
 
-    Ok(Json(payments))
+    Ok(Json(PaginatedResponse {
+        items: payments,
+        total,
+        page,
+        per_page,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -599,10 +910,21 @@ struct CreateUtilityRequest {
 async fn admin_create_utility(
     headers: HeaderMap,
     Json(body): Json<CreateUtilityRequest>,
-) -> Result<Json<UtilityCharge>, StatusCode> {
-    let user = extract_user(&headers)?;
+) -> Result<Json<UtilityCharge>, impl IntoResponse> {
+    let user = extract_user(&headers).map_err(|s| s.into_response())?;
     if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into_response());
+    }
+
+    // Validation
+    if body.description.trim().is_empty() {
+        return Err(validation_error("description", "Description is required").into_response());
+    }
+    if body.amount <= 0.0 {
+        return Err(validation_error("amount", "Amount must be greater than 0").into_response());
+    }
+    if !is_valid_date(&body.due_date) {
+        return Err(validation_error("due_date", "Due date must be in YYYY-MM-DD format").into_response());
     }
 
     let id = Uuid::new_v4().to_string();
@@ -613,7 +935,7 @@ async fn admin_create_utility(
         "INSERT INTO utility_charges (id, description, amount, due_date, paid, created_at) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
         rusqlite::params![id, body.description, body.amount, body.due_date, now],
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
 
     Ok(Json(UtilityCharge {
         id,
@@ -661,10 +983,24 @@ async fn admin_list_tenants(headers: HeaderMap) -> Result<Json<Vec<mason_wheeler
 async fn admin_create_tenant(
     headers: HeaderMap,
     Json(body): Json<mason_wheeler_shared::CreateTenantRequest>,
-) -> Result<Json<mason_wheeler_shared::TenantUser>, StatusCode> {
-    let user = extract_user(&headers)?;
+) -> Result<Json<mason_wheeler_shared::TenantUser>, impl IntoResponse> {
+    let user = extract_user(&headers).map_err(|s| s.into_response())?;
     if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into_response());
+    }
+
+    // Validation
+    if body.name.trim().is_empty() {
+        return Err(validation_error("name", "Name is required").into_response());
+    }
+    if body.email.trim().is_empty() {
+        return Err(validation_error("email", "Email is required").into_response());
+    }
+    if !is_valid_email(&body.email) {
+        return Err(validation_error("email", "Invalid email format").into_response());
+    }
+    if body.password.len() < 8 {
+        return Err(validation_error("password", "Password must be at least 8 characters").into_response());
     }
 
     let id = Uuid::new_v4().to_string();
@@ -676,7 +1012,7 @@ async fn admin_create_tenant(
         "INSERT INTO users (id, email, password_hash, role, name, created_at) VALUES (?1, ?2, ?3, 'tenant', ?4, ?5)",
         rusqlite::params![id, body.email, password_hash, body.name, now],
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
 
     // Send welcome email (non-blocking)
     {
@@ -722,6 +1058,204 @@ async fn admin_delete_tenant(
     }
 
     Ok(Json(serde_json::json!({ "deleted": id })))
+}
+
+// ---------------------------------------------------------------------------
+// Admin report handlers
+// ---------------------------------------------------------------------------
+
+async fn admin_report_revenue(headers: HeaderMap) -> Result<Json<Vec<RevenueMonth>>, StatusCode> {
+    let user = extract_user(&headers)?;
+    if user.role != "landlord" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let db = get_db();
+
+    let mut stmt = db
+        .prepare(
+            "SELECT strftime('%Y-%m', paid_date) as month,
+                    SUM(amount) as total,
+                    SUM(CASE WHEN payment_type = 'rent' THEN amount ELSE 0 END) as rent,
+                    SUM(CASE WHEN payment_type = 'utility' THEN amount ELSE 0 END) as utility,
+                    COUNT(*) as cnt
+             FROM payments
+             WHERE status = 'completed' AND paid_date IS NOT NULL
+               AND paid_date >= date('now', '-12 months')
+             GROUP BY strftime('%Y-%m', paid_date)
+             ORDER BY month DESC",
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let months = stmt
+        .query_map([], |row| {
+            Ok(RevenueMonth {
+                month: row.get(0)?,
+                total: row.get(1)?,
+                rent: row.get(2)?,
+                utility: row.get(3)?,
+                count: row.get(4)?,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+
+    Ok(Json(months))
+}
+
+async fn admin_report_maintenance(headers: HeaderMap) -> Result<Json<MaintenanceStats>, StatusCode> {
+    let user = extract_user(&headers)?;
+    if user.role != "landlord" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let db = get_db();
+
+    let total: u32 = db
+        .query_row("SELECT COUNT(*) FROM maintenance_requests", [], |row| row.get(0))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let submitted: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'submitted'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let in_progress: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'in_progress'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let completed: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'completed'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(MaintenanceStats {
+        total,
+        submitted,
+        in_progress,
+        completed,
+    }))
+}
+
+async fn admin_report_overview(headers: HeaderMap) -> Result<Json<OverviewReport>, StatusCode> {
+    let user = extract_user(&headers)?;
+    if user.role != "landlord" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let db = get_db();
+
+    let total_collected: f64 = db
+        .query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'completed'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let total_outstanding: f64 = db
+        .query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM utility_charges WHERE paid = 0",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let total_payments: u32 = db
+        .query_row("SELECT COUNT(*) FROM payments", [], |row| row.get(0))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let active_tenants: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM users WHERE role = 'tenant'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Maintenance stats
+    let m_total: u32 = db
+        .query_row("SELECT COUNT(*) FROM maintenance_requests", [], |row| row.get(0))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let m_submitted: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'submitted'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let m_in_progress: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'in_progress'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let m_completed: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'completed'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Monthly revenue (last 12 months)
+    let mut stmt = db
+        .prepare(
+            "SELECT strftime('%Y-%m', paid_date) as month,
+                    SUM(amount) as total,
+                    SUM(CASE WHEN payment_type = 'rent' THEN amount ELSE 0 END) as rent,
+                    SUM(CASE WHEN payment_type = 'utility' THEN amount ELSE 0 END) as utility,
+                    COUNT(*) as cnt
+             FROM payments
+             WHERE status = 'completed' AND paid_date IS NOT NULL
+               AND paid_date >= date('now', '-12 months')
+             GROUP BY strftime('%Y-%m', paid_date)
+             ORDER BY month DESC",
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let monthly_revenue = stmt
+        .query_map([], |row| {
+            Ok(RevenueMonth {
+                month: row.get(0)?,
+                total: row.get(1)?,
+                rent: row.get(2)?,
+                utility: row.get(3)?,
+                count: row.get(4)?,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+
+    Ok(Json(OverviewReport {
+        total_collected,
+        total_outstanding,
+        total_payments,
+        active_tenants,
+        maintenance_stats: MaintenanceStats {
+            total: m_total,
+            submitted: m_submitted,
+            in_progress: m_in_progress,
+            completed: m_completed,
+        },
+        monthly_revenue,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -912,30 +1446,67 @@ async fn delete_document(
 }
 
 
-async fn list_maintenance(headers: HeaderMap) -> Result<Json<Vec<MaintenanceRequest>>, StatusCode> {
+async fn list_maintenance(
+    headers: HeaderMap,
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<PaginatedResponse<MaintenanceRequest>>, StatusCode> {
     let user = extract_user(&headers)?;
     let db = get_db();
 
-    let (query, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = if user.role == "landlord" {
-        (
-            "SELECT id, user_id, title, description, status, photo_path, created_at, updated_at
-             FROM maintenance_requests ORDER BY created_at DESC",
-            vec![],
-        )
+    let page = params.page.unwrap_or(1).max(1);
+    let per_page = params.per_page.unwrap_or(20).min(100);
+    let offset = (page - 1) * per_page;
+
+    let mut where_clauses: Vec<String> = vec![];
+    let mut bind_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+
+    if user.role != "landlord" {
+        where_clauses.push(format!("user_id = ?{}", bind_params.len() + 1));
+        bind_params.push(Box::new(user.id.clone()) as Box<dyn rusqlite::types::ToSql>);
+    }
+
+    if let Some(ref search) = params.search {
+        if !search.is_empty() {
+            where_clauses.push(format!("title LIKE ?{}", bind_params.len() + 1));
+            bind_params.push(Box::new(format!("%{}%", search)));
+        }
+    }
+
+    if let Some(ref status) = params.status {
+        if !status.is_empty() && status != "all" {
+            where_clauses.push(format!("status = ?{}", bind_params.len() + 1));
+            bind_params.push(Box::new(status.clone()));
+        }
+    }
+
+    let where_sql = if where_clauses.is_empty() {
+        "1=1".to_string()
     } else {
-        (
-            "SELECT id, user_id, title, description, status, photo_path, created_at, updated_at
-             FROM maintenance_requests WHERE user_id = ?1 ORDER BY created_at DESC",
-            vec![Box::new(user.id) as Box<dyn rusqlite::types::ToSql>],
-        )
+        where_clauses.join(" AND ")
     };
 
-    let mut stmt = db.prepare(query).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let count_sql = format!("SELECT COUNT(*) FROM maintenance_requests WHERE {}", where_sql);
+    let count_refs: Vec<&dyn rusqlite::types::ToSql> = bind_params.iter().map(|p| p.as_ref()).collect();
+    let total: u64 = db
+        .query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let query_sql = format!(
+        "SELECT id, user_id, title, description, status, photo_path, created_at, updated_at
+         FROM maintenance_requests WHERE {} ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
+        where_sql,
+        bind_params.len() + 1,
+        bind_params.len() + 2,
+    );
 
+    let mut query_params = bind_params;
+    query_params.push(Box::new(per_page as i64));
+    query_params.push(Box::new(offset as i64));
+    let query_refs: Vec<&dyn rusqlite::types::ToSql> = query_params.iter().map(|p| p.as_ref()).collect();
+
+    let mut stmt = db.prepare(&query_sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let requests = stmt
-        .query_map(params_ref.as_slice(), |row| {
+        .query_map(query_refs.as_slice(), |row| {
             Ok(MaintenanceRequest {
                 id: row.get(0)?,
                 user_id: row.get(1)?,
@@ -951,7 +1522,12 @@ async fn list_maintenance(headers: HeaderMap) -> Result<Json<Vec<MaintenanceRequ
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
 
-    Ok(Json(requests))
+    Ok(Json(PaginatedResponse {
+        items: requests,
+        total,
+        page,
+        per_page,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -963,8 +1539,20 @@ struct CreateMaintenanceRequest {
 async fn create_maintenance(
     headers: HeaderMap,
     Json(body): Json<CreateMaintenanceRequest>,
-) -> Result<Json<MaintenanceRequest>, StatusCode> {
-    let user = extract_user(&headers)?;
+) -> Result<Json<MaintenanceRequest>, impl IntoResponse> {
+    let user = extract_user(&headers).map_err(|s| s.into_response())?;
+
+    let title = sanitize_input(&body.title);
+    let description = sanitize_input(&body.description);
+
+    // Validation
+    if title.is_empty() {
+        return Err(validation_error("title", "Title is required").into_response());
+    }
+    if description.is_empty() {
+        return Err(validation_error("description", "Description is required").into_response());
+    }
+
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -972,15 +1560,15 @@ async fn create_maintenance(
     db.execute(
         "INSERT INTO maintenance_requests (id, user_id, title, description, status, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, 'submitted', ?5, ?5)",
-        rusqlite::params![id, user.id, body.title, body.description, now],
+        rusqlite::params![id, user.id, title, description, now],
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
 
     Ok(Json(MaintenanceRequest {
         id,
         user_id: user.id,
-        title: body.title,
-        description: body.description,
+        title,
+        description,
         status: "submitted".to_string(),
         photo_path: None,
         created_at: now.clone(),
@@ -1087,6 +1675,7 @@ async fn create_maintenance_message(
     Json(body): Json<CreateMessageRequest>,
 ) -> Result<Json<MaintenanceMessage>, StatusCode> {
     let user = extract_user(&headers)?;
+    let message = sanitize_input(&body.message);
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -1094,7 +1683,7 @@ async fn create_maintenance_message(
     db.execute(
         "INSERT INTO maintenance_messages (id, request_id, user_id, message, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![id, request_id, user.id, body.message, now],
+        rusqlite::params![id, request_id, user.id, message, now],
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -1103,7 +1692,7 @@ async fn create_maintenance_message(
         request_id,
         user_id: user.id,
         user_name: Some(user.name),
-        message: body.message,
+        message,
         created_at: now,
     }))
 }
@@ -1199,6 +1788,106 @@ async fn create_checkout(
 }
 
 // ---------------------------------------------------------------------------
+// Utility charge checkout
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct UtilityCheckoutRequest {
+    utility_charge_id: String,
+}
+
+#[axum::debug_handler]
+async fn create_utility_checkout(
+    headers: HeaderMap,
+    Json(body): Json<UtilityCheckoutRequest>,
+) -> Result<Json<CheckoutResponse>, StatusCode> {
+    let user = extract_user(&headers)?;
+
+    let stripe_secret =
+        std::env::var("STRIPE_SECRET_KEY").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Look up the utility charge from DB (scope the lock so it's dropped before await)
+    let (charge_id, description, amount_cents) = {
+        let db = get_db();
+        let charge = db
+            .query_row(
+                "SELECT id, description, amount, paid FROM utility_charges WHERE id = ?1",
+                rusqlite::params![body.utility_charge_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, f64>(2)?,
+                        row.get::<_, bool>(3)?,
+                    ))
+                },
+            )
+            .map_err(|_| StatusCode::NOT_FOUND)?;
+
+        let (charge_id, description, amount, paid) = charge;
+
+        if paid {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+
+        let amount_cents = (amount * 100.0).round() as i64;
+        (charge_id, description, amount_cents)
+    };
+
+    let client = stripe::Client::new(&stripe_secret);
+
+    let success_url = "https://properties.mason-wheeler.com/tenant/payments?success=true";
+    let cancel_url = "https://properties.mason-wheeler.com/tenant/payments?cancelled=true";
+
+    let mut params = stripe::CreateCheckoutSession::new();
+    params.success_url = Some(success_url);
+    params.cancel_url = Some(cancel_url);
+    params.mode = Some(stripe::CheckoutSessionMode::Payment);
+    params.payment_method_types = Some(vec![
+        stripe::CreateCheckoutSessionPaymentMethodTypes::UsBankAccount,
+        stripe::CreateCheckoutSessionPaymentMethodTypes::Card,
+    ]);
+    params.line_items = Some(vec![stripe::CreateCheckoutSessionLineItems {
+        price_data: Some(stripe::CreateCheckoutSessionLineItemsPriceData {
+            currency: stripe::Currency::USD,
+            product_data: Some(
+                stripe::CreateCheckoutSessionLineItemsPriceDataProductData {
+                    name: description.clone(),
+                    ..Default::default()
+                },
+            ),
+            unit_amount: Some(amount_cents),
+            ..Default::default()
+        }),
+        quantity: Some(1),
+        ..Default::default()
+    }]);
+    params.metadata = Some(
+        [
+            ("user_id".to_string(), user.id.clone()),
+            ("description".to_string(), description),
+            ("utility_charge_id".to_string(), charge_id),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let session = stripe::CheckoutSession::create(&client, params)
+        .await
+        .map_err(|e| {
+            tracing::error!("Stripe utility checkout session creation failed: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let url = session.url.ok_or_else(|| {
+        tracing::error!("Stripe returned no checkout URL");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(CheckoutResponse { url }))
+}
+
+// ---------------------------------------------------------------------------
 // Stripe webhook
 // ---------------------------------------------------------------------------
 
@@ -1259,6 +1948,28 @@ async fn stripe_webhook(
             if let Err(e) = result {
                 tracing::error!("Failed to record payment from webhook: {}", e);
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+
+            // If this payment is for a utility charge, mark it as paid
+            let utility_charge_id = session
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("utility_charge_id").cloned());
+
+            if let Some(ref charge_id) = utility_charge_id {
+                let result = db.execute(
+                    "UPDATE utility_charges SET paid = 1, payment_id = ?1 WHERE id = ?2",
+                    rusqlite::params![payment_id, charge_id],
+                );
+                if let Err(e) = result {
+                    tracing::error!("Failed to mark utility charge {} as paid: {}", charge_id, e);
+                } else {
+                    tracing::info!(
+                        utility_charge_id = %charge_id,
+                        payment_id = %payment_id,
+                        "Utility charge marked as paid"
+                    );
+                }
             }
 
             tracing::info!(
@@ -1387,4 +2098,212 @@ async fn create_signature(
         "id": sig_id,
         "signature_path": file_path,
     })))
+}
+
+// ---------------------------------------------------------------------------
+// PDF download handlers
+// ---------------------------------------------------------------------------
+
+fn pdf_response(filename: &str, data: Vec<u8>) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        "application/pdf".parse().unwrap(),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"{}\"", filename).parse().unwrap(),
+    );
+    (StatusCode::OK, headers, data)
+}
+
+async fn pdf_move_in_checklist(
+    headers: HeaderMap,
+) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
+    let _user = extract_user(&headers)?;
+    let db = get_db();
+
+    // Fetch most recent checklist
+    let checklist_row = db
+        .query_row(
+            "SELECT id, property_address, tenant_name, landlord_name, move_in_date, tenant_signed, landlord_signed, created_at
+             FROM move_in_checklists ORDER BY created_at DESC LIMIT 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, bool>(5)?,
+                    row.get::<_, bool>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
+            },
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let (id, address, tenant, landlord, date, t_signed, l_signed, created) = checklist_row;
+
+    let mut stmt = db
+        .prepare(
+            "SELECT id, room, item, condition, notes, photo_path, created_at
+             FROM checklist_items WHERE checklist_id = ?1 ORDER BY rowid ASC",
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let items: Vec<ChecklistItem> = stmt
+        .query_map(rusqlite::params![id], |row| {
+            Ok(ChecklistItem {
+                id: row.get(0)?,
+                room: row.get(1)?,
+                item: row.get(2)?,
+                condition: row.get(3)?,
+                notes: row.get(4)?,
+                photo_path: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut room_map: std::collections::BTreeMap<String, Vec<ChecklistItem>> =
+        std::collections::BTreeMap::new();
+    for item in items {
+        room_map.entry(item.room.clone()).or_default().push(item);
+    }
+    let rooms: Vec<ChecklistRoom> = room_map
+        .into_iter()
+        .map(|(name, items)| ChecklistRoom { name, items })
+        .collect();
+
+    let checklist = MoveInChecklist {
+        id,
+        property_address: address,
+        tenant_name: tenant,
+        landlord_name: landlord,
+        move_in_date: date,
+        tenant_signed: t_signed,
+        landlord_signed: l_signed,
+        rooms,
+        created_at: created,
+    };
+
+    let json_data =
+        serde_json::to_string(&checklist).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let data = pdf::generate_move_in_checklist_pdf(&json_data)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(pdf_response("move-in-checklist.pdf", data))
+}
+
+async fn pdf_lead_paint_disclosure(
+    headers: HeaderMap,
+) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
+    let _user = extract_user(&headers)?;
+    let db = get_db();
+
+    let row = db
+        .query_row(
+            "SELECT property_address, year_built, landlord_name, tenant_name
+             FROM lead_paint_disclosures ORDER BY created_at DESC LIMIT 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i32>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let (property_address, year_built, landlord_name, tenant_name) = row;
+
+    let data = pdf::generate_lead_paint_disclosure_pdf(
+        &property_address,
+        year_built,
+        &landlord_name,
+        &tenant_name,
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(pdf_response("lead-paint-disclosure.pdf", data))
+}
+
+async fn pdf_deposit_receipt(
+    headers: HeaderMap,
+) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
+    let _user = extract_user(&headers)?;
+    let db = get_db();
+
+    let row = db
+        .query_row(
+            "SELECT tenant_name, deposit_amount, deposit_type, depository_name, date_received
+             FROM deposit_receipts ORDER BY created_at DESC LIMIT 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let (tenant_name, amount, deposit_type, depository, date) = row;
+
+    let data =
+        pdf::generate_deposit_receipt_pdf(&tenant_name, amount, &deposit_type, &depository, &date)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(pdf_response("deposit-receipt.pdf", data))
+}
+
+async fn pdf_payment_receipt(
+    headers: HeaderMap,
+    Path(payment_id): Path<String>,
+) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
+    let _user = extract_user(&headers)?;
+    let db = get_db();
+
+    let row = db
+        .query_row(
+            "SELECT p.amount, p.payment_type, p.description, p.paid_date, p.created_at, u.name
+             FROM payments p
+             JOIN users u ON p.user_id = u.id
+             WHERE p.id = ?1",
+            rusqlite::params![payment_id],
+            |row| {
+                Ok((
+                    row.get::<_, f64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let (amount, payment_type, description, paid_date, created_at, tenant_name) = row;
+    let date = paid_date.unwrap_or(created_at);
+    let desc = description.unwrap_or_default();
+
+    let data =
+        pdf::generate_payment_receipt_pdf(&tenant_name, amount, &payment_type, &date, &desc)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(pdf_response(
+        &format!("payment-receipt-{}.pdf", payment_id),
+        data,
+    ))
 }
