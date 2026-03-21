@@ -9,6 +9,16 @@ use uuid::Uuid;
 use crate::db::get_db;
 use crate::routes::extract_user;
 
+fn landlord_name() -> String {
+    let db = get_db();
+    db.query_row(
+        "SELECT name FROM users WHERE role = 'landlord' LIMIT 1",
+        [],
+        |r| r.get::<_, String>(0),
+    )
+    .unwrap_or_else(|_| "Landlord".to_string())
+}
+
 pub fn disclosures_router() -> Router {
     Router::new()
         // Move-in checklist
@@ -185,7 +195,7 @@ async fn create_checklist(
             checklist_id,
             "8404 12th Ave S, Seattle, WA 98108",
             body.tenant_name,
-            "Mason Wheeler",
+            &landlord_name(),
             body.move_in_date,
             now,
         ],
@@ -232,7 +242,7 @@ async fn create_checklist(
         id: checklist_id,
         property_address: "8404 12th Ave S, Seattle, WA 98108".to_string(),
         tenant_name: body.tenant_name,
-        landlord_name: "Mason Wheeler".to_string(),
+        landlord_name: landlord_name(),
         move_in_date: body.move_in_date,
         tenant_signed: false,
         landlord_signed: false,

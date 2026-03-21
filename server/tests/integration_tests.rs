@@ -164,7 +164,7 @@ mod db_tests {
             .unwrap();
         assert_eq!(email, "test-landlord@test.com");
         assert_eq!(role, "landlord");
-        assert_eq!(name, "Mason Wheeler");
+        assert_eq!(name, "Test Landlord");
     }
 
     #[test]
@@ -193,7 +193,7 @@ mod db_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(name, "Mason Wheeler");
+        assert_eq!(name, "Test Landlord");
         assert_eq!(email, "test-landlord@test.com");
     }
 }
@@ -591,7 +591,7 @@ mod disclosure_api_tests {
             .await;
         resp.assert_status_ok();
         let info: LandlordContactInfo = resp.json();
-        assert_eq!(info.name, "Mason Wheeler");
+        assert_eq!(info.name, "Test Landlord");
         assert_eq!(info.email, "test-landlord@test.com");
     }
 
@@ -661,7 +661,7 @@ mod disclosure_api_tests {
                 "records_available": false,
                 "records_description": null,
                 "tenant_name": "Test Tenant",
-                "landlord_name": "Mason Wheeler",
+                "landlord_name": "Test Landlord",
                 "tenant_acknowledged": false,
                 "landlord_signed": true,
                 "date": "2026-03-20"
@@ -740,7 +740,7 @@ mod disclosure_api_tests {
                 "depository_name": "Chase Bank",
                 "depository_address": "123 Main St, Seattle, WA",
                 "date_received": "2026-05-01",
-                "landlord_name": "Mason Wheeler"
+                "landlord_name": "Test Landlord"
             }))
             .await;
         resp.assert_status_ok();
@@ -795,7 +795,7 @@ mod disclosure_api_tests {
         resp.assert_status_ok();
         let checklist: MoveInChecklist = resp.json();
         assert_eq!(checklist.tenant_name, "Test Tenant");
-        assert_eq!(checklist.landlord_name, "Mason Wheeler");
+        assert_eq!(checklist.landlord_name, "Test Landlord");
         assert!(!checklist.tenant_signed);
         assert!(!checklist.landlord_signed);
         // Default rooms should be populated
