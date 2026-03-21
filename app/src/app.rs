@@ -84,6 +84,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/tenant/payments") view=|| view! { <ProtectedLayout><pages::tenant::payments::TenantPayments /></ProtectedLayout> } />
                 <Route path=path!("/tenant/documents") view=|| view! { <ProtectedLayout><pages::tenant::documents::TenantDocuments /></ProtectedLayout> } />
                 <Route path=path!("/tenant/maintenance") view=|| view! { <ProtectedLayout><pages::tenant::maintenance::TenantMaintenance /></ProtectedLayout> } />
+                <Route path=path!("/tenant/sign-lease") view=|| view! { <ProtectedLayout><pages::tenant::sign_lease::SignLeasePage /></ProtectedLayout> } />
 
                 // Admin routes — auth required
                 <Route path=path!("/admin") view=|| view! { <ProtectedLayout><pages::admin::dashboard::AdminDashboard /></ProtectedLayout> } />
