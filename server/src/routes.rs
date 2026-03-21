@@ -2504,10 +2504,15 @@ async fn tenant_sign_lease(
 
     let now = chrono::Utc::now().to_rfc3339();
 
-    // Get IP from headers
+    // Collect audit metadata from headers
     let ip = headers
         .get("x-forwarded-for")
         .or_else(|| headers.get("x-real-ip"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    let user_agent = headers
+        .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
@@ -2519,12 +2524,16 @@ async fn tenant_sign_lease(
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Also record in signatures table for audit trail
+    // Full audit trail in signatures table (ESIGN Act compliance)
     let sig_id = uuid::Uuid::new_v4().to_string();
+    let audit_path = format!(
+        "typed:{}|ip:{}|ua:{}",
+        name, ip, user_agent
+    );
     db.execute(
         "INSERT INTO signatures (id, document_type, document_id, signer_role, signer_name, signature_path, signed_at)
          VALUES (?1, 'lease', ?2, 'tenant', ?3, ?4, ?5)",
-        rusqlite::params![sig_id, body.lease_id, name, format!("typed:{}", name), now],
+        rusqlite::params![sig_id, body.lease_id, name, audit_path, now],
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
