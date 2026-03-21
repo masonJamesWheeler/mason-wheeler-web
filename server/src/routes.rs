@@ -179,6 +179,134 @@ pub fn extract_user(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
     })
 }
 
+fn require_auth(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
+    extract_user(headers)
+}
+
+fn require_landlord(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
+    let user = extract_user(headers)?;
+    if user.role != "landlord" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(user)
+}
+
+// ---------------------------------------------------------------------------
+// Row-mapping helpers
+// ---------------------------------------------------------------------------
+
+fn payment_from_row(row: &rusqlite::Row) -> rusqlite::Result<Payment> {
+    Ok(Payment {
+        id: row.get(0)?,
+        user_id: row.get(1)?,
+        amount: row.get(2)?,
+        payment_type: row.get(3)?,
+        description: row.get(4)?,
+        stripe_payment_id: row.get(5)?,
+        status: row.get(6)?,
+        due_date: row.get(7)?,
+        paid_date: row.get(8)?,
+        created_at: row.get(9)?,
+    })
+}
+
+fn utility_from_row(row: &rusqlite::Row) -> rusqlite::Result<UtilityCharge> {
+    Ok(UtilityCharge {
+        id: row.get(0)?,
+        description: row.get(1)?,
+        amount: row.get(2)?,
+        due_date: row.get(3)?,
+        paid: row.get::<_, i32>(4)? != 0,
+        payment_id: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
+fn maintenance_from_row(row: &rusqlite::Row) -> rusqlite::Result<MaintenanceRequest> {
+    Ok(MaintenanceRequest {
+        id: row.get(0)?,
+        user_id: row.get(1)?,
+        title: row.get(2)?,
+        description: row.get(3)?,
+        status: row.get(4)?,
+        photo_path: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Shared query helpers
+// ---------------------------------------------------------------------------
+
+fn query_maintenance_stats(db: &rusqlite::Connection) -> Result<MaintenanceStats, StatusCode> {
+    let mut stmt = db
+        .prepare("SELECT status, COUNT(*) FROM maintenance_requests GROUP BY status")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut submitted: u32 = 0;
+    let mut in_progress: u32 = 0;
+    let mut completed: u32 = 0;
+    let mut total: u32 = 0;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    for row in rows {
+        let (status, count) = row.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        total += count;
+        match status.as_str() {
+            "submitted" => submitted = count,
+            "in_progress" => in_progress = count,
+            "completed" => completed = count,
+            _ => {}
+        }
+    }
+
+    Ok(MaintenanceStats {
+        total,
+        submitted,
+        in_progress,
+        completed,
+    })
+}
+
+fn query_monthly_revenue(db: &rusqlite::Connection) -> Result<Vec<RevenueMonth>, StatusCode> {
+    let mut stmt = db
+        .prepare(
+            "SELECT strftime('%Y-%m', paid_date) as month,
+                    SUM(amount) as total,
+                    SUM(CASE WHEN payment_type = 'rent' THEN amount ELSE 0 END) as rent,
+                    SUM(CASE WHEN payment_type = 'utility' THEN amount ELSE 0 END) as utility,
+                    COUNT(*) as cnt
+             FROM payments
+             WHERE status = 'completed' AND paid_date IS NOT NULL
+               AND paid_date >= date('now', '-12 months')
+             GROUP BY strftime('%Y-%m', paid_date)
+             ORDER BY month DESC",
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let months = stmt
+        .query_map([], |row| {
+            Ok(RevenueMonth {
+                month: row.get(0)?,
+                total: row.get(1)?,
+                rent: row.get(2)?,
+                utility: row.get(3)?,
+                count: row.get(4)?,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+
+    Ok(months)
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -393,7 +521,7 @@ async fn logout() -> impl IntoResponse {
 }
 
 async fn get_me(headers: HeaderMap) -> Result<Json<User>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     Ok(Json(User {
         id: user.id,
         email: user.email,
@@ -524,7 +652,7 @@ async fn reset_password(Json(body): Json<ResetPasswordRequest>) -> Result<impl I
 // ---------------------------------------------------------------------------
 
 async fn tenant_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     let db = get_db();
 
     let recent_payments = {
@@ -535,20 +663,7 @@ async fn tenant_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Sta
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        stmt.query_map(rusqlite::params![user.id], |row| {
-            Ok(Payment {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                amount: row.get(2)?,
-                payment_type: row.get(3)?,
-                description: row.get(4)?,
-                stripe_payment_id: row.get(5)?,
-                status: row.get(6)?,
-                due_date: row.get(7)?,
-                paid_date: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        })
+        stmt.query_map(rusqlite::params![user.id], |row| payment_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>()
@@ -563,18 +678,7 @@ async fn tenant_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Sta
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        stmt.query_map(rusqlite::params![user.id], |row| {
-            Ok(MaintenanceRequest {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                title: row.get(2)?,
-                description: row.get(3)?,
-                status: row.get(4)?,
-                photo_path: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        })
+        stmt.query_map(rusqlite::params![user.id], |row| maintenance_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>()
@@ -588,17 +692,7 @@ async fn tenant_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Sta
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        stmt.query_map([], |row| {
-            Ok(UtilityCharge {
-                id: row.get(0)?,
-                description: row.get(1)?,
-                amount: row.get(2)?,
-                due_date: row.get(3)?,
-                paid: row.get::<_, i32>(4)? != 0,
-                payment_id: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })
+        stmt.query_map([], |row| utility_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>()
@@ -621,7 +715,7 @@ async fn tenant_payments(
     headers: HeaderMap,
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<Payment>>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     let db = get_db();
 
     let page = params.page.unwrap_or(1).max(1);
@@ -661,20 +755,7 @@ async fn tenant_payments(
 
     let mut stmt = db.prepare(&query_sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let payments = stmt
-        .query_map(query_refs.as_slice(), |row| {
-            Ok(Payment {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                amount: row.get(2)?,
-                payment_type: row.get(3)?,
-                description: row.get(4)?,
-                stripe_payment_id: row.get(5)?,
-                status: row.get(6)?,
-                due_date: row.get(7)?,
-                paid_date: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        })
+        .query_map(query_refs.as_slice(), |row| payment_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
@@ -688,7 +769,7 @@ async fn tenant_payments(
 }
 
 async fn tenant_utilities(headers: HeaderMap) -> Result<Json<Vec<UtilityCharge>>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let mut stmt = db
@@ -699,17 +780,7 @@ async fn tenant_utilities(headers: HeaderMap) -> Result<Json<Vec<UtilityCharge>>
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let charges = stmt
-        .query_map([], |row| {
-            Ok(UtilityCharge {
-                id: row.get(0)?,
-                description: row.get(1)?,
-                amount: row.get(2)?,
-                due_date: row.get(3)?,
-                paid: row.get::<_, i32>(4)? != 0,
-                payment_id: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })
+        .query_map([], |row| utility_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
@@ -722,10 +793,7 @@ async fn tenant_utilities(headers: HeaderMap) -> Result<Json<Vec<UtilityCharge>>
 // ---------------------------------------------------------------------------
 
 async fn admin_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
 
     let db = get_db();
 
@@ -737,20 +805,7 @@ async fn admin_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Stat
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        stmt.query_map([], |row| {
-            Ok(Payment {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                amount: row.get(2)?,
-                payment_type: row.get(3)?,
-                description: row.get(4)?,
-                stripe_payment_id: row.get(5)?,
-                status: row.get(6)?,
-                due_date: row.get(7)?,
-                paid_date: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        })
+        stmt.query_map([], |row| payment_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>()
@@ -765,18 +820,7 @@ async fn admin_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Stat
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        stmt.query_map([], |row| {
-            Ok(MaintenanceRequest {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                title: row.get(2)?,
-                description: row.get(3)?,
-                status: row.get(4)?,
-                photo_path: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        })
+        stmt.query_map([], |row| maintenance_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>()
@@ -790,17 +834,7 @@ async fn admin_dashboard(headers: HeaderMap) -> Result<Json<DashboardData>, Stat
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        stmt.query_map([], |row| {
-            Ok(UtilityCharge {
-                id: row.get(0)?,
-                description: row.get(1)?,
-                amount: row.get(2)?,
-                due_date: row.get(3)?,
-                paid: row.get::<_, i32>(4)? != 0,
-                payment_id: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })
+        stmt.query_map([], |row| utility_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>()
@@ -831,10 +865,7 @@ async fn admin_payments(
     headers: HeaderMap,
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<Payment>>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
 
     let db = get_db();
 
@@ -886,20 +917,7 @@ async fn admin_payments(
 
     let mut stmt = db.prepare(&query_sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let payments = stmt
-        .query_map(query_refs.as_slice(), |row| {
-            Ok(Payment {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                amount: row.get(2)?,
-                payment_type: row.get(3)?,
-                description: row.get(4)?,
-                stripe_payment_id: row.get(5)?,
-                status: row.get(6)?,
-                due_date: row.get(7)?,
-                paid_date: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        })
+        .query_map(query_refs.as_slice(), |row| payment_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
@@ -923,10 +941,7 @@ async fn admin_create_utility(
     headers: HeaderMap,
     Json(body): Json<CreateUtilityRequest>,
 ) -> Result<Json<UtilityCharge>, impl IntoResponse> {
-    let user = extract_user(&headers).map_err(|s| s.into_response())?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN.into_response());
-    }
+    let _user = require_landlord(&headers).map_err(|s| s.into_response())?;
 
     let description = sanitize_input(&body.description);
 
@@ -967,10 +982,7 @@ async fn admin_create_utility(
 // ---------------------------------------------------------------------------
 
 async fn admin_list_tenants(headers: HeaderMap) -> Result<Json<Vec<mason_wheeler_shared::TenantUser>>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
 
     let db = get_db();
 
@@ -998,10 +1010,7 @@ async fn admin_create_tenant(
     headers: HeaderMap,
     Json(body): Json<mason_wheeler_shared::CreateTenantRequest>,
 ) -> Result<Json<mason_wheeler_shared::TenantUser>, impl IntoResponse> {
-    let user = extract_user(&headers).map_err(|s| s.into_response())?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN.into_response());
-    }
+    let _user = require_landlord(&headers).map_err(|s| s.into_response())?;
 
     let tenant_name = sanitize_input(&body.name);
 
@@ -1056,10 +1065,7 @@ async fn admin_delete_tenant(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
 
     let db = get_db();
     let rows = db
@@ -1081,92 +1087,21 @@ async fn admin_delete_tenant(
 // ---------------------------------------------------------------------------
 
 async fn admin_report_revenue(headers: HeaderMap) -> Result<Json<Vec<RevenueMonth>>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
+    let _user = require_landlord(&headers)?;
     let db = get_db();
-
-    let mut stmt = db
-        .prepare(
-            "SELECT strftime('%Y-%m', paid_date) as month,
-                    SUM(amount) as total,
-                    SUM(CASE WHEN payment_type = 'rent' THEN amount ELSE 0 END) as rent,
-                    SUM(CASE WHEN payment_type = 'utility' THEN amount ELSE 0 END) as utility,
-                    COUNT(*) as cnt
-             FROM payments
-             WHERE status = 'completed' AND paid_date IS NOT NULL
-               AND paid_date >= date('now', '-12 months')
-             GROUP BY strftime('%Y-%m', paid_date)
-             ORDER BY month DESC",
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let months = stmt
-        .query_map([], |row| {
-            Ok(RevenueMonth {
-                month: row.get(0)?,
-                total: row.get(1)?,
-                rent: row.get(2)?,
-                utility: row.get(3)?,
-                count: row.get(4)?,
-            })
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>();
-
+    let months = query_monthly_revenue(&db)?;
     Ok(Json(months))
 }
 
 async fn admin_report_maintenance(headers: HeaderMap) -> Result<Json<MaintenanceStats>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
+    let _user = require_landlord(&headers)?;
     let db = get_db();
-
-    let mut stmt = db
-        .prepare("SELECT status, COUNT(*) FROM maintenance_requests GROUP BY status")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let mut submitted: u32 = 0;
-    let mut in_progress: u32 = 0;
-    let mut completed: u32 = 0;
-    let mut total: u32 = 0;
-
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    for row in rows {
-        let (status, count) = row.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        total += count;
-        match status.as_str() {
-            "submitted" => submitted = count,
-            "in_progress" => in_progress = count,
-            "completed" => completed = count,
-            _ => {}
-        }
-    }
-
-    Ok(Json(MaintenanceStats {
-        total,
-        submitted,
-        in_progress,
-        completed,
-    }))
+    let stats = query_maintenance_stats(&db)?;
+    Ok(Json(stats))
 }
 
 async fn admin_report_overview(headers: HeaderMap) -> Result<Json<OverviewReport>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
 
     let db = get_db();
 
@@ -1198,76 +1133,15 @@ async fn admin_report_overview(headers: HeaderMap) -> Result<Json<OverviewReport
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Maintenance stats
-    let m_total: u32 = db
-        .query_row("SELECT COUNT(*) FROM maintenance_requests", [], |row| row.get(0))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let m_submitted: u32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'submitted'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let m_in_progress: u32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'in_progress'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let m_completed: u32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'completed'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Monthly revenue (last 12 months)
-    let mut stmt = db
-        .prepare(
-            "SELECT strftime('%Y-%m', paid_date) as month,
-                    SUM(amount) as total,
-                    SUM(CASE WHEN payment_type = 'rent' THEN amount ELSE 0 END) as rent,
-                    SUM(CASE WHEN payment_type = 'utility' THEN amount ELSE 0 END) as utility,
-                    COUNT(*) as cnt
-             FROM payments
-             WHERE status = 'completed' AND paid_date IS NOT NULL
-               AND paid_date >= date('now', '-12 months')
-             GROUP BY strftime('%Y-%m', paid_date)
-             ORDER BY month DESC",
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let monthly_revenue = stmt
-        .query_map([], |row| {
-            Ok(RevenueMonth {
-                month: row.get(0)?,
-                total: row.get(1)?,
-                rent: row.get(2)?,
-                utility: row.get(3)?,
-                count: row.get(4)?,
-            })
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>();
+    let maintenance_stats = query_maintenance_stats(&db)?;
+    let monthly_revenue = query_monthly_revenue(&db)?;
 
     Ok(Json(OverviewReport {
         total_collected,
         total_outstanding,
         total_payments,
         active_tenants,
-        maintenance_stats: MaintenanceStats {
-            total: m_total,
-            submitted: m_submitted,
-            in_progress: m_in_progress,
-            completed: m_completed,
-        },
+        maintenance_stats,
         monthly_revenue,
     }))
 }
@@ -1277,7 +1151,7 @@ async fn admin_report_overview(headers: HeaderMap) -> Result<Json<OverviewReport
 // ---------------------------------------------------------------------------
 
 async fn list_documents(headers: HeaderMap) -> Result<Json<Vec<Document>>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let mut stmt = db
@@ -1305,10 +1179,7 @@ async fn upload_document(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<Document>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
 
     let mut file_data: Option<Vec<u8>> = None;
     let mut original_name: Option<String> = None;
@@ -1390,7 +1261,7 @@ async fn serve_document_file(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let (disk_path, name): (String, String) = db
@@ -1432,10 +1303,7 @@ async fn delete_document(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
 
     let db = get_db();
 
@@ -1464,7 +1332,7 @@ async fn list_maintenance(
     headers: HeaderMap,
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<MaintenanceRequest>>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     let db = get_db();
 
     let page = params.page.unwrap_or(1).max(1);
@@ -1520,18 +1388,7 @@ async fn list_maintenance(
 
     let mut stmt = db.prepare(&query_sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let requests = stmt
-        .query_map(query_refs.as_slice(), |row| {
-            Ok(MaintenanceRequest {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                title: row.get(2)?,
-                description: row.get(3)?,
-                status: row.get(4)?,
-                photo_path: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        })
+        .query_map(query_refs.as_slice(), |row| maintenance_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
@@ -1554,7 +1411,7 @@ async fn create_maintenance(
     headers: HeaderMap,
     Json(body): Json<CreateMaintenanceRequest>,
 ) -> Result<Json<MaintenanceRequest>, impl IntoResponse> {
-    let user = extract_user(&headers).map_err(|s| s.into_response())?;
+    let user = require_auth(&headers).map_err(|s| s.into_response())?;
 
     let title = sanitize_input(&body.title);
     let description = sanitize_input(&body.description);
@@ -1600,10 +1457,7 @@ async fn update_maintenance(
     Path(id): Path<String>,
     Json(body): Json<UpdateMaintenanceRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let _user = require_landlord(&headers)?;
     let now = chrono::Utc::now().to_rfc3339();
 
     {
@@ -1652,7 +1506,7 @@ async fn list_maintenance_messages(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<MaintenanceMessage>>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let mut stmt = db
@@ -1693,7 +1547,7 @@ async fn create_maintenance_message(
     Path(request_id): Path<String>,
     Json(body): Json<CreateMessageRequest>,
 ) -> Result<Json<MaintenanceMessage>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     let message = sanitize_input(&body.message);
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -1737,7 +1591,7 @@ async fn create_checkout(
     headers: HeaderMap,
     body: Option<Json<CheckoutRequest>>,
 ) -> Result<Json<CheckoutResponse>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
 
     let stripe_secret =
         std::env::var("STRIPE_SECRET_KEY").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1819,7 +1673,7 @@ async fn create_utility_checkout(
     headers: HeaderMap,
     Json(body): Json<UtilityCheckoutRequest>,
 ) -> Result<Json<CheckoutResponse>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
 
     let stripe_secret =
         std::env::var("STRIPE_SECRET_KEY").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -2059,7 +1913,7 @@ async fn create_signature(
     headers: HeaderMap,
     Json(body): Json<CreateSignatureRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
 
     // Validate signer_role
     if body.signer_role != "tenant" && body.signer_role != "landlord" {
@@ -2160,7 +2014,7 @@ fn pdf_response(filename: &str, data: Vec<u8>) -> (StatusCode, HeaderMap, Vec<u8
 async fn pdf_move_in_checklist(
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     // Fetch most recent checklist
@@ -2243,7 +2097,7 @@ async fn pdf_move_in_checklist(
 async fn pdf_lead_paint_disclosure(
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let row = db
@@ -2278,7 +2132,7 @@ async fn pdf_lead_paint_disclosure(
 async fn pdf_deposit_receipt(
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let row = db
@@ -2311,7 +2165,7 @@ async fn pdf_payment_receipt(
     headers: HeaderMap,
     Path(payment_id): Path<String>,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let row = db

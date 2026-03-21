@@ -4,31 +4,59 @@ use lettre::{
     transport::smtp::authentication::Credentials,
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
 };
+use std::sync::OnceLock;
 
-/// Send an email via SMTP. If SMTP_USER is not configured, the send is
-/// skipped with a warning so that development environments work without
-/// an SMTP server.
-pub async fn send_email(to: &str, subject: &str, body: &str) -> Result<()> {
+// ---------------------------------------------------------------------------
+// Cached SMTP transport — built once and reused across all send_email calls
+// ---------------------------------------------------------------------------
+
+static SMTP_TRANSPORT: OnceLock<AsyncSmtpTransport<Tokio1Executor>> = OnceLock::new();
+
+fn get_smtp_transport() -> Result<&'static AsyncSmtpTransport<Tokio1Executor>> {
+    if let Some(t) = SMTP_TRANSPORT.get() {
+        return Ok(t);
+    }
+
     let smtp_host = std::env::var("SMTP_HOST").unwrap_or_else(|_| "smtp.gmail.com".to_string());
     let smtp_port: u16 = std::env::var("SMTP_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(587);
+    let smtp_user =
+        std::env::var("SMTP_USER").context("SMTP_USER must be set to initialize SMTP transport")?;
+    let smtp_password =
+        std::env::var("SMTP_PASSWORD").context("SMTP_PASSWORD must be set when SMTP_USER is set")?;
+
+    let creds = Credentials::new(smtp_user, smtp_password);
+
+    let transport: AsyncSmtpTransport<Tokio1Executor> =
+        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp_host)
+            .context("failed to create SMTP transport")?
+            .port(smtp_port)
+            .credentials(creds)
+            .build();
+
+    // Ignore if another thread raced us
+    let _ = SMTP_TRANSPORT.set(transport);
+    Ok(SMTP_TRANSPORT.get().unwrap())
+}
+
+/// Send an email via SMTP. If SMTP_USER is not configured, the send is
+/// skipped with a warning so that development environments work without
+/// an SMTP server.
+pub async fn send_email(to: &str, subject: &str, body: &str) -> Result<()> {
     let smtp_from =
         std::env::var("SMTP_FROM").unwrap_or_else(|_| "noreply@mason-wheeler.com".to_string());
 
-    let smtp_user = match std::env::var("SMTP_USER") {
-        Ok(u) => u,
-        Err(_) => {
-            tracing::warn!(
-                "SMTP_USER not set — skipping email to {to} (subject: {subject})"
-            );
-            return Ok(());
-        }
-    };
+    // If SMTP_USER is not set, skip gracefully for dev environments
+    if std::env::var("SMTP_USER").is_err() {
+        tracing::warn!(
+            "SMTP_USER not set — skipping email to {to} (subject: {subject})"
+        );
+        return Ok(());
+    }
 
-    let smtp_password =
-        std::env::var("SMTP_PASSWORD").context("SMTP_PASSWORD must be set when SMTP_USER is set")?;
+    let mailer = get_smtp_transport()?;
 
     let email = Message::builder()
         .from(smtp_from.parse().context("invalid SMTP_FROM address")?)
@@ -37,15 +65,6 @@ pub async fn send_email(to: &str, subject: &str, body: &str) -> Result<()> {
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_string())
         .context("failed to build email message")?;
-
-    let creds = Credentials::new(smtp_user, smtp_password);
-
-    let mailer: AsyncSmtpTransport<Tokio1Executor> =
-        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp_host)
-            .context("failed to create SMTP transport")?
-            .port(smtp_port)
-            .credentials(creds)
-            .build();
 
     mailer
         .send(email)

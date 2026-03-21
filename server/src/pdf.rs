@@ -1,10 +1,18 @@
 use genpdf::elements::{Break, LinearLayout, Paragraph, TableLayout};
+use genpdf::fonts::{FontData, FontFamily};
 use genpdf::style::{Style, StyledString};
 use genpdf::{Document, SimplePageDecorator};
+use std::sync::OnceLock;
 
 const PROPERTY_ADDRESS: &str = "8404 12th Ave S, Seattle, WA 98108";
 
-fn new_doc(title: &str) -> Result<Document, anyhow::Error> {
+static CACHED_FONTS: OnceLock<FontFamily<FontData>> = OnceLock::new();
+
+fn get_font_family() -> Result<FontFamily<FontData>, anyhow::Error> {
+    if let Some(fonts) = CACHED_FONTS.get() {
+        return Ok(fonts.clone());
+    }
+
     let font_family =
         genpdf::fonts::from_files("/usr/share/fonts/truetype/liberation", "LiberationSans", None)
             .or_else(|_| {
@@ -28,6 +36,14 @@ fn new_doc(title: &str) -> Result<Document, anyhow::Error> {
                     None,
                 )
             })?;
+
+    // Store in cache (ignore if another thread beat us)
+    let _ = CACHED_FONTS.set(font_family.clone());
+    Ok(font_family)
+}
+
+fn new_doc(title: &str) -> Result<Document, anyhow::Error> {
+    let font_family = get_font_family()?;
 
     let mut doc = Document::new(font_family);
     doc.set_title(title);
