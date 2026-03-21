@@ -13,12 +13,13 @@ pub fn shell(options: leptos::config::LeptosOptions) -> impl IntoView {
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
-                <meta name="description" content="8404 12th Ave S - Rental Property in Seattle, WA" />
+                <meta name="description" content="8404 12th Ave S - Resident portal" />
+                <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
                 <AutoReload options=options.clone() />
                 <HydrationScripts options />
                 <MetaTags />
             </head>
-            <body class="min-h-screen bg-white">
+            <body class="min-h-screen bg-stone-50">
                 <App />
             </body>
         </html>

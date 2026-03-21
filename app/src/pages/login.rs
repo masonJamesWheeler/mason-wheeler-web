@@ -123,7 +123,7 @@ pub fn LoginPage() -> impl IntoView {
                         {move || if loading.get() {
                             "Signing in..."
                         } else {
-                            "Continue"
+                            "Sign in"
                         }}
                     </button>
                 </form>
