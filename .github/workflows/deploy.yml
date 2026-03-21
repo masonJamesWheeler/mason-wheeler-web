@@ -100,6 +100,11 @@ jobs:
             set -e
             cd /home/azureuser/app
 
+            # Stop services FIRST to release the binary file
+            sudo systemctl stop mason-wheeler-app.service 2>/dev/null || true
+            sudo systemctl stop mason-wheeler-web.service 2>/dev/null || true
+            sleep 1
+
             # Backup current binary for rollback
             if [ -f mason-wheeler-app ]; then
               cp mason-wheeler-app mason-wheeler-app.bak
@@ -116,20 +121,21 @@ jobs:
             # Clean up staging
             rm -rf _staging _staging_site
 
-            # Stop old service (Node.js or previous version)
-            sudo systemctl stop mason-wheeler-web.service 2>/dev/null || true
+            # Start the service
+            sudo systemctl start mason-wheeler-app.service
 
-            # Restart the new service
-            sudo systemctl restart mason-wheeler-app.service
-
-            # Wait for startup
-            sleep 3
+            # Wait for startup (bcrypt + SQLite init on first run)
+            sleep 8
 
             # Health check
-            if curl -sf http://127.0.0.1:3000 > /dev/null 2>&1; then
+            if curl -sf --max-time 5 http://127.0.0.1:3000 > /dev/null 2>&1; then
               echo "Health check PASSED — app is running"
             else
-              echo "Health check FAILED — rolling back"
+              echo "Health check FAILED — diagnosing..."
+              sudo systemctl status mason-wheeler-app.service --no-pager || true
+              sudo journalctl -u mason-wheeler-app.service --no-pager -n 30 || true
+              ls -la /home/azureuser/app/.env 2>/dev/null || echo ".env file MISSING — run deploy/setup.sh first"
+              echo "Rolling back..."
               if [ -f mason-wheeler-app.bak ]; then
                 cp mason-wheeler-app.bak mason-wheeler-app
                 sudo systemctl restart mason-wheeler-app.service
