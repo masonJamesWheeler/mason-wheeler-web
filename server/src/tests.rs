@@ -11,6 +11,7 @@ use crate::auth;
 // a landlord user so route handlers that require auth can work.
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn test_db() -> Connection {
     let conn = Connection::open_in_memory().expect("in-memory db");
     conn.execute_batch("PRAGMA foreign_keys=ON;").ok();
@@ -171,6 +172,7 @@ fn test_db() -> Connection {
 }
 
 /// Seed a landlord user into the given connection and return (id, email, password).
+#[allow(dead_code)]
 fn seed_landlord(conn: &Connection) -> (String, String, String) {
     let email = "landlord@test.com";
     let password = "testpassword123";
@@ -184,6 +186,7 @@ fn seed_landlord(conn: &Connection) -> (String, String, String) {
 }
 
 /// Seed a tenant user into the given connection and return (id, email, password).
+#[allow(dead_code)]
 fn seed_tenant(conn: &Connection) -> (String, String, String) {
     let email = "tenant@test.com";
     let password = "tenantpass123";
@@ -198,7 +201,7 @@ fn seed_tenant(conn: &Connection) -> (String, String, String) {
 
 /// Generate a token cookie string for use in integration tests.
 fn auth_cookie_for(user_id: &str, email: &str, role: &str) -> String {
-    let token = auth::generate_token(user_id, email, role).expect("generate token");
+    let token = auth::generate_token(user_id, email, role, "Test User").expect("generate token");
     format!("token={token}")
 }
 
@@ -230,7 +233,7 @@ fn test_generate_and_validate_token() {
     let email = "alice@example.com";
     let role = "tenant";
 
-    let token = auth::generate_token(user_id, email, role).expect("token generation should succeed");
+    let token = auth::generate_token(user_id, email, role, "Test User").expect("token generation should succeed");
 
     let claims = auth::validate_token(&token).expect("token validation should succeed");
     assert_eq!(claims.sub, user_id);
@@ -250,6 +253,7 @@ fn test_expired_token_rejected() {
         sub: "user-1".to_string(),
         email: "expired@example.com".to_string(),
         role: "tenant".to_string(),
+        session_id: None,
         exp: 1_000_000, // far in the past (1970)
     };
 
@@ -278,10 +282,14 @@ fn ensure_init_db() {
     INIT.call_once(|| {
         let tmp_dir = tempfile::tempdir().expect("create temp dir");
         let db_path = tmp_dir.path().join("test.db");
-        std::env::set_var("DATABASE_PATH", db_path.to_str().unwrap());
-        std::env::set_var("ADMIN_EMAIL", "admin@test.com");
-        std::env::set_var("ADMIN_PASSWORD", "adminpass123");
-        std::env::set_var("ADMIN_NAME", "Test Admin");
+        // SAFETY: We call this during test init before any threads are spawned,
+        // and test parallelism is managed by the test harness.
+        unsafe {
+            std::env::set_var("DATABASE_PATH", db_path.to_str().unwrap());
+            std::env::set_var("ADMIN_EMAIL", "admin@test.com");
+            std::env::set_var("ADMIN_PASSWORD", "adminpass123");
+            std::env::set_var("ADMIN_NAME", "Test Admin");
+        }
 
         // init_db also creates data/documents and data/signatures directories
         crate::db::init_db();
@@ -424,10 +432,7 @@ async fn test_create_tenant() {
 
     let resp = server
         .post("/admin/tenants")
-        .add_header(
-            axum::http::header::COOKIE,
-            cookie.parse().unwrap(),
-        )
+        .add_header(axum::http::header::COOKIE, cookie)
         .json(&serde_json::json!({
             "email": "newtenant@test.com",
             "password": "password1234",
@@ -470,10 +475,7 @@ async fn test_create_maintenance_request() {
 
     let resp = server
         .post("/maintenance")
-        .add_header(
-            axum::http::header::COOKIE,
-            cookie.parse().unwrap(),
-        )
+        .add_header(axum::http::header::COOKIE, cookie)
         .json(&serde_json::json!({
             "title": "Leaky faucet",
             "description": "The kitchen faucet is dripping constantly."
@@ -495,10 +497,7 @@ async fn test_create_utility_charge() {
 
     let resp = server
         .post("/admin/utilities")
-        .add_header(
-            axum::http::header::COOKIE,
-            cookie.parse().unwrap(),
-        )
+        .add_header(axum::http::header::COOKIE, cookie)
         .json(&serde_json::json!({
             "description": "Water bill - March",
             "amount": 75.50,

@@ -1,6 +1,7 @@
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use uuid::Uuid;
 
 use crate::db::get_db;
@@ -10,18 +11,25 @@ pub struct Claims {
     pub sub: String,
     pub email: String,
     pub role: String,
+    pub name: String,
     pub session_id: Option<String>,
     pub exp: usize,
 }
 
-fn get_secret() -> String {
-    std::env::var("SESSION_SECRET").unwrap_or_else(|_| "default-secret-change-me".to_string())
+static SESSION_SECRET: OnceLock<String> = OnceLock::new();
+
+fn get_secret() -> &'static str {
+    SESSION_SECRET.get_or_init(|| {
+        std::env::var("SESSION_SECRET")
+            .expect("SESSION_SECRET environment variable must be set")
+    })
 }
 
 pub fn generate_token(
     user_id: &str,
     email: &str,
     role: &str,
+    name: &str,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     // Create a session in the database and embed its ID in the token
     let session_id = create_session(user_id);
@@ -35,6 +43,7 @@ pub fn generate_token(
         sub: user_id.to_string(),
         email: email.to_string(),
         role: role.to_string(),
+        name: name.to_string(),
         session_id: Some(session_id),
         exp: expiration,
     };

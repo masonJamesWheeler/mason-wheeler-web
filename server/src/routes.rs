@@ -43,7 +43,7 @@ const MAX_LOGIN_ATTEMPTS: u32 = 5;
 const LOGIN_WINDOW_SECS: u64 = 15 * 60; // 15 minutes
 
 fn check_rate_limit(key: &str) -> Result<(), StatusCode> {
-    let mut attempts = get_login_attempts().lock().unwrap();
+    let attempts = get_login_attempts().lock().unwrap();
     if let Some((count, first_attempt)) = attempts.get(key) {
         if first_attempt.elapsed().as_secs() < LOGIN_WINDOW_SECS && *count >= MAX_LOGIN_ATTEMPTS {
             return Err(StatusCode::TOO_MANY_REQUESTS);
@@ -73,9 +73,9 @@ fn clear_login_attempts(key: &str) {
 // ---------------------------------------------------------------------------
 
 fn sanitize_input(s: &str) -> String {
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
     let trimmed = s.trim();
-    let re = Regex::new(r"<[^>]*>").unwrap();
-    re.replace_all(trimmed, "").to_string()
+    RE.replace_all(trimmed, "").to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -152,21 +152,11 @@ pub fn extract_user(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
 
     let claims = auth::validate_token(token).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    // Look up user name from DB
-    let db = get_db();
-    let name: String = db
-        .query_row(
-            "SELECT name FROM users WHERE id = ?1",
-            rusqlite::params![claims.sub],
-            |row| row.get(0),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
     Ok(AuthUser {
         id: claims.sub,
         email: claims.email,
         role: claims.role,
-        name,
+        name: claims.name,
     })
 }
 
@@ -346,7 +336,7 @@ async fn login(Json(body): Json<LoginRequest>) -> Result<impl IntoResponse, impl
     // Successful login — clear rate limit counter
     clear_login_attempts(&rate_limit_key);
 
-    let token = auth::generate_token(&id, &email, &role)
+    let token = auth::generate_token(&id, &email, &role, &name)
         .map_err(|_| validation_error("", "Internal server error"))?;
 
     let cookie = auth::auth_cookie(&token);
@@ -916,8 +906,10 @@ async fn admin_create_utility(
         return Err(StatusCode::FORBIDDEN.into_response());
     }
 
+    let description = sanitize_input(&body.description);
+
     // Validation
-    if body.description.trim().is_empty() {
+    if description.is_empty() {
         return Err(validation_error("description", "Description is required").into_response());
     }
     if body.amount <= 0.0 {
@@ -933,13 +925,13 @@ async fn admin_create_utility(
     let db = get_db();
     db.execute(
         "INSERT INTO utility_charges (id, description, amount, due_date, paid, created_at) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
-        rusqlite::params![id, body.description, body.amount, body.due_date, now],
+        rusqlite::params![id, description, body.amount, body.due_date, now],
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
 
     Ok(Json(UtilityCharge {
         id,
-        description: body.description,
+        description,
         amount: body.amount,
         due_date: body.due_date,
         paid: false,
@@ -989,8 +981,10 @@ async fn admin_create_tenant(
         return Err(StatusCode::FORBIDDEN.into_response());
     }
 
+    let tenant_name = sanitize_input(&body.name);
+
     // Validation
-    if body.name.trim().is_empty() {
+    if tenant_name.is_empty() {
         return Err(validation_error("name", "Name is required").into_response());
     }
     if body.email.trim().is_empty() {
@@ -1010,18 +1004,18 @@ async fn admin_create_tenant(
     let db = get_db();
     db.execute(
         "INSERT INTO users (id, email, password_hash, role, name, created_at) VALUES (?1, ?2, ?3, 'tenant', ?4, ?5)",
-        rusqlite::params![id, body.email, password_hash, body.name, now],
+        rusqlite::params![id, body.email, password_hash, tenant_name, now],
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
 
     // Send welcome email (non-blocking)
     {
         let tenant_email = body.email.clone();
-        let tenant_name = body.name.clone();
+        let tn = tenant_name.clone();
         let temp_password = body.password.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                email::send_welcome_email(&tenant_email, &tenant_name, &temp_password).await
+                email::send_welcome_email(&tenant_email, &tn, &temp_password).await
             {
                 tracing::error!("Failed to send welcome email: {e}");
             }
@@ -1031,7 +1025,7 @@ async fn admin_create_tenant(
     Ok(Json(mason_wheeler_shared::TenantUser {
         id,
         email: body.email,
-        name: body.name,
+        name: tenant_name,
         created_at: now,
     }))
 }
@@ -1586,7 +1580,10 @@ async fn update_maintenance(
     Path(id): Path<String>,
     Json(body): Json<UpdateMaintenanceRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let user = extract_user(&headers)?;
+    if user.role != "landlord" {
+        return Err(StatusCode::FORBIDDEN);
+    }
     let now = chrono::Utc::now().to_rfc3339();
 
     let db = get_db();
@@ -1796,7 +1793,6 @@ struct UtilityCheckoutRequest {
     utility_charge_id: String,
 }
 
-#[axum::debug_handler]
 async fn create_utility_checkout(
     headers: HeaderMap,
     Json(body): Json<UtilityCheckoutRequest>,

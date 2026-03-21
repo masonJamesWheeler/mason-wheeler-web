@@ -1,9 +1,11 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
+    use axum::http::HeaderValue;
     use axum::Router;
     use leptos_axum::{file_and_error_handler, generate_route_list, LeptosRoutes};
     use mason_wheeler_app::app::{shell, App};
+    use tower_http::set_header::SetResponseHeaderLayer;
     use tracing_subscriber::EnvFilter;
 
     dotenvy::dotenv().ok();
@@ -39,7 +41,23 @@ async fn main() {
         .with_state(leptos_options);
 
     let app = leptos_router
-        .nest("/api", api_router);
+        .nest("/api", api_router)
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_XSS_PROTECTION,
+            HeaderValue::from_static("1; mode=block"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::REFERRER_POLICY,
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ));
 
     tracing::info!("Starting server at http://{}", addr);
 

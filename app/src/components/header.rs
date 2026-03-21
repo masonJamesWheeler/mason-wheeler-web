@@ -25,14 +25,16 @@ pub fn Header() -> impl IntoView {
             .unwrap_or(false)
     };
 
-    let user_name = move || {
+    let user_name = Signal::derive(move || {
         auth.as_ref()
             .and_then(|a| a.user.get())
             .map(|u| u.name.clone())
             .unwrap_or_default()
-    };
+    });
 
-    let base_path = move || if is_landlord() { "/admin" } else { "/tenant" };
+    let base_path = Signal::derive(move || {
+        if is_landlord() { "/admin".to_string() } else { "/tenant".to_string() }
+    });
 
     let handle_logout = move |_| {
         #[cfg(feature = "hydrate")]
@@ -70,16 +72,16 @@ pub fn Header() -> impl IntoView {
                     // Desktop nav
                     <div class="hidden md:flex md:items-center md:space-x-1">
                         <Show when=move || is_logged_in()>
-                            <A href={move || base_path().to_string()} attr:class=nav_link>"Dashboard"</A>
-                            <A href={move || format!("{}/payments", base_path())} attr:class=nav_link>"Payments"</A>
-                            <A href={move || format!("{}/documents", base_path())} attr:class=nav_link>"Documents"</A>
-                            <A href={move || format!("{}/maintenance", base_path())} attr:class=nav_link>"Maintenance"</A>
+                            <A href={move || base_path.get()} attr:class=nav_link>"Dashboard"</A>
+                            <A href={move || format!("{}/payments", base_path.get())} attr:class=nav_link>"Payments"</A>
+                            <A href={move || format!("{}/documents", base_path.get())} attr:class=nav_link>"Documents"</A>
+                            <A href={move || format!("{}/maintenance", base_path.get())} attr:class=nav_link>"Maintenance"</A>
 
                             // User dropdown — pure CSS hover
                             <div class="group relative ml-2">
                                 <button class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-stone-700 text-xs font-semibold text-white transition-colors hover:bg-stone-800">
                                     {move || {
-                                        let name = user_name();
+                                        let name = user_name.get();
                                         name.split_whitespace()
                                             .filter_map(|w| w.chars().next())
                                             .take(2)
@@ -89,7 +91,7 @@ pub fn Header() -> impl IntoView {
                                 <div class="invisible absolute right-0 top-full z-50 mt-1 min-w-[180px] opacity-0 transition-all duration-200 group-hover:visible group-hover:opacity-100">
                                     <div class="overflow-hidden rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
                                         <div class="border-b border-stone-100 px-4 py-2">
-                                            <p class="text-sm font-medium text-stone-900">{move || user_name()}</p>
+                                            <p class="text-sm font-medium text-stone-900">{move || user_name.get()}</p>
                                         </div>
                                         <Show when=move || is_landlord()>
                                             <A href="/admin/reports" attr:class="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100">"Reports"</A>
@@ -140,13 +142,13 @@ pub fn Header() -> impl IntoView {
             >
                 <div class="px-4 py-3 space-y-0.5">
                     <Show when=move || is_logged_in()>
-                        <A href={move || base_path().to_string()} attr:class=mobile_link>"Dashboard"</A>
-                        <A href={move || format!("{}/payments", base_path())} attr:class=mobile_link>"Payments"</A>
-                        <A href={move || format!("{}/documents", base_path())} attr:class=mobile_link>"Documents"</A>
-                        <A href={move || format!("{}/maintenance", base_path())} attr:class=mobile_link>"Maintenance"</A>
+                        <A href={move || base_path.get()} attr:class=mobile_link>"Dashboard"</A>
+                        <A href={move || format!("{}/payments", base_path.get())} attr:class=mobile_link>"Payments"</A>
+                        <A href={move || format!("{}/documents", base_path.get())} attr:class=mobile_link>"Documents"</A>
+                        <A href={move || format!("{}/maintenance", base_path.get())} attr:class=mobile_link>"Maintenance"</A>
                         <div class="border-t border-stone-100 my-2" />
                         <div class="px-3 py-2">
-                            <p class="text-sm font-medium text-stone-900">{move || user_name()}</p>
+                            <p class="text-sm font-medium text-stone-900">{move || user_name.get()}</p>
                         </div>
                         <button
                             class="block w-full text-left py-2.5 px-3 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
