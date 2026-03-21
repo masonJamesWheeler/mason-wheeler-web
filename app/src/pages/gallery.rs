@@ -151,10 +151,7 @@ pub fn GalleryPage() -> impl IntoView {
                                     alt={alt.to_string()}
                                     class="max-h-[75vh] max-w-full object-contain rounded-lg"
                                 />
-                                <div class="mt-3 text-center">
-                                    <p class="text-white/90 text-sm font-medium">{alt}</p>
-                                    <p class="text-white/50 text-xs mt-0.5">{format!("{} · {} of {}", cat, idx + 1, photo_count)}</p>
-                                </div>
+                                <p class="mt-3 text-white/40 text-xs">{format!("{} of {}", idx + 1, photo_count)}</p>
                             </div>
                         }
                     })
