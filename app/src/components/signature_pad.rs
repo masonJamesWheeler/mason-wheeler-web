@@ -2,244 +2,93 @@
 
 use leptos::prelude::*;
 
+/// Typed-name signature component.
+/// User types their full legal name, it renders in a script font as the "signature",
+/// they check an agreement box, then click Sign.
+/// Returns the typed name string to the callback.
 #[component]
 pub fn SignaturePad(
+    /// Called with the typed legal name when the user signs
     on_sign: Callback<String>,
-    #[prop(default = 400)] width: u32,
-    #[prop(default = 150)] height: u32,
+    /// Label shown above the signature line (e.g. "Tenant Signature")
+    #[prop(default = "Signature".to_string(), into)]
+    label: String,
+    /// The document name being signed (e.g. "Residential Lease Agreement")
+    #[prop(default = "this document".to_string(), into)]
+    document_name: String,
 ) -> impl IntoView {
-    let canvas_ref = NodeRef::<leptos::html::Canvas>::new();
-    let (is_empty, set_is_empty) = signal(true);
+    let (typed_name, set_typed_name) = signal(String::new());
+    let (agreed, set_agreed) = signal(false);
 
-    #[cfg(feature = "hydrate")]
-    {
-        use wasm_bindgen::prelude::*;
-        use wasm_bindgen::JsCast;
-        use web_sys::{
-            CanvasRenderingContext2d, HtmlCanvasElement, MouseEvent, TouchEvent,
-        };
+    let can_sign = move || !typed_name.get().trim().is_empty() && agreed.get();
 
-        let drawing = std::rc::Rc::new(std::cell::Cell::new(false));
-
-        let get_ctx = move || -> Option<CanvasRenderingContext2d> {
-            let canvas = canvas_ref.get()?;
-            let canvas: &HtmlCanvasElement = canvas.as_ref();
-            canvas
-                .get_context("2d")
-                .ok()?
-                .and_then(|obj| obj.dyn_into::<CanvasRenderingContext2d>().ok())
-        };
-
-        // Initialize placeholder text after mount
-        Effect::new(move || {
-            if let Some(ctx) = get_ctx() {
-                let canvas = canvas_ref.get().unwrap();
-                let canvas: &HtmlCanvasElement = canvas.as_ref();
-                ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
-                ctx.set_font("14px sans-serif");
-                ctx.set_fill_style_str("#9ca3af");
-                ctx.set_text_align("center");
-                ctx.set_text_baseline("middle");
-                let _ = ctx.fill_text(
-                    "Sign here",
-                    canvas.width() as f64 / 2.0,
-                    canvas.height() as f64 / 2.0,
-                );
-            }
-        });
-
-        let d1 = drawing.clone();
-        let mouse_down = move |ev: MouseEvent| {
-            d1.set(true);
-            if let Some(ctx) = get_ctx() {
-                if is_empty.get_untracked() {
-                    let canvas = canvas_ref.get().unwrap();
-                    let canvas: &HtmlCanvasElement = canvas.as_ref();
-                    ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
-                    set_is_empty.set(false);
-                }
-                let canvas = canvas_ref.get().unwrap();
-                let canvas: &HtmlCanvasElement = canvas.as_ref();
-                let rect = canvas.get_bounding_client_rect();
-                let x = ev.client_x() as f64 - rect.left();
-                let y = ev.client_y() as f64 - rect.top();
-                ctx.begin_path();
-                ctx.move_to(x, y);
-                ctx.set_stroke_style_str("#1c1917");
-                ctx.set_line_width(2.0);
-                ctx.set_line_cap("round");
-                ctx.set_line_join("round");
-            }
-        };
-
-        let d2 = drawing.clone();
-        let mouse_move = move |ev: MouseEvent| {
-            if d2.get() {
-                if let Some(ctx) = get_ctx() {
-                    let canvas = canvas_ref.get().unwrap();
-                    let canvas: &HtmlCanvasElement = canvas.as_ref();
-                    let rect = canvas.get_bounding_client_rect();
-                    let x = ev.client_x() as f64 - rect.left();
-                    let y = ev.client_y() as f64 - rect.top();
-                    ctx.line_to(x, y);
-                    ctx.stroke();
-                }
-            }
-        };
-
-        let d3 = drawing.clone();
-        let mouse_up = move |_ev: MouseEvent| {
-            d3.set(false);
-        };
-
-        let d4 = drawing.clone();
-        let mouse_leave = move |_ev: MouseEvent| {
-            d4.set(false);
-        };
-
-        let d5 = drawing.clone();
-        let touch_start = move |ev: TouchEvent| {
-            ev.prevent_default();
-            d5.set(true);
-            if let Some(touch) = ev.touches().get(0) {
-                if let Some(ctx) = get_ctx() {
-                    if is_empty.get_untracked() {
-                        let canvas = canvas_ref.get().unwrap();
-                        let canvas: &HtmlCanvasElement = canvas.as_ref();
-                        ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
-                        set_is_empty.set(false);
-                    }
-                    let canvas = canvas_ref.get().unwrap();
-                    let canvas: &HtmlCanvasElement = canvas.as_ref();
-                    let rect = canvas.get_bounding_client_rect();
-                    let x = touch.client_x() as f64 - rect.left();
-                    let y = touch.client_y() as f64 - rect.top();
-                    ctx.begin_path();
-                    ctx.move_to(x, y);
-                    ctx.set_stroke_style_str("#1c1917");
-                    ctx.set_line_width(2.0);
-                    ctx.set_line_cap("round");
-                    ctx.set_line_join("round");
-                }
-            }
-        };
-
-        let d6 = drawing.clone();
-        let touch_move = move |ev: TouchEvent| {
-            ev.prevent_default();
-            if d6.get() {
-                if let Some(touch) = ev.touches().get(0) {
-                    if let Some(ctx) = get_ctx() {
-                        let canvas = canvas_ref.get().unwrap();
-                        let canvas: &HtmlCanvasElement = canvas.as_ref();
-                        let rect = canvas.get_bounding_client_rect();
-                        let x = touch.client_x() as f64 - rect.left();
-                        let y = touch.client_y() as f64 - rect.top();
-                        ctx.line_to(x, y);
-                        ctx.stroke();
-                    }
-                }
-            }
-        };
-
-        let d7 = drawing.clone();
-        let touch_end = move |ev: TouchEvent| {
-            ev.prevent_default();
-            d7.set(false);
-        };
-
-        let on_clear = move |_| {
-            if let Some(ctx) = get_ctx() {
-                let canvas = canvas_ref.get().unwrap();
-                let canvas: &HtmlCanvasElement = canvas.as_ref();
-                ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
-                ctx.set_font("14px sans-serif");
-                ctx.set_fill_style_str("#9ca3af");
-                ctx.set_text_align("center");
-                ctx.set_text_baseline("middle");
-                let _ = ctx.fill_text(
-                    "Sign here",
-                    canvas.width() as f64 / 2.0,
-                    canvas.height() as f64 / 2.0,
-                );
-                set_is_empty.set(true);
-            }
-        };
-
-        let on_sign_click = move |_| {
-            if is_empty.get_untracked() {
-                return;
-            }
-            if let Some(canvas_el) = canvas_ref.get() {
-                let canvas: &HtmlCanvasElement = canvas_el.as_ref();
-                if let Ok(data_url) = canvas.to_data_url_with_type("image/png") {
-                    on_sign.run(data_url);
-                }
-            }
-        };
-
-        view! {
-            <div class="flex flex-col gap-2">
-                <canvas
-                    node_ref=canvas_ref
-                    width=width
-                    height=height
-                    class="border-2 border-dashed border-stone-300 rounded-lg cursor-crosshair bg-white touch-none"
-                    on:mousedown=mouse_down
-                    on:mousemove=mouse_move
-                    on:mouseup=mouse_up
-                    on:mouseleave=mouse_leave
-                    on:touchstart=touch_start
-                    on:touchmove=touch_move
-                    on:touchend=touch_end
-                />
-                <div class="flex gap-2">
-                    <button
-                        type="button"
-                        class="px-4 py-2 text-sm font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors"
-                        on:click=on_clear
-                    >
-                        "Clear"
-                    </button>
-                    <button
-                        type="button"
-                        class="px-4 py-2 text-sm font-medium text-white bg-stone-800 hover:bg-stone-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled=move || is_empty.get()
-                        on:click=on_sign_click
-                    >
-                        "Sign"
-                    </button>
-                </div>
-            </div>
+    let handle_sign = move |_| {
+        let name = typed_name.get().trim().to_string();
+        if !name.is_empty() && agreed.get() {
+            on_sign.run(name);
         }
-    }
+    };
 
-    #[cfg(not(feature = "hydrate"))]
-    {
-        view! {
-            <div class="flex flex-col gap-2">
-                <canvas
-                    node_ref=canvas_ref
-                    width=width
-                    height=height
-                    class="border-2 border-dashed border-stone-300 rounded-lg cursor-crosshair bg-white touch-none"
+    view! {
+        <div class="space-y-5">
+            // Label
+            <p class="text-sm font-medium text-stone-700">{label}</p>
+
+            // Name input
+            <div>
+                <label class="block text-xs text-stone-500 mb-1.5 ml-1">"Type your full legal name"</label>
+                <input
+                    type="text"
+                    class="input"
+                    placeholder="e.g. John Michael Smith"
+                    autocomplete="off"
+                    on:input=move |ev| set_typed_name.set(event_target_value(&ev))
+                    prop:value=move || typed_name.get()
                 />
-                <div class="flex gap-2">
-                    <button
-                        type="button"
-                        class="px-4 py-2 text-sm font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors"
-                    >
-                        "Clear"
-                    </button>
-                    <button
-                        type="button"
-                        class="px-4 py-2 text-sm font-medium text-white bg-stone-800 hover:bg-stone-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled=true
-                    >
-                        "Sign"
-                    </button>
-                </div>
             </div>
-        }
+
+            // Signature preview
+            <Show when=move || !typed_name.get().trim().is_empty()>
+                <div class="border border-stone-200 rounded-xl bg-white px-6 py-8 text-center">
+                    <p class="text-xs text-stone-400 mb-3">"Signature preview"</p>
+                    <p
+                        class="text-3xl text-stone-900"
+                        style="font-family: 'Dancing Script', 'Segoe Script', 'Brush Script MT', cursive; font-style: italic;"
+                    >
+                        {move || typed_name.get()}
+                    </p>
+                    <div class="mt-4 mx-auto w-64 border-b border-stone-300" />
+                </div>
+            </Show>
+
+            // Agreement checkbox
+            <label class="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                    type="checkbox"
+                    class="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-500"
+                    on:change=move |ev| {
+                        set_agreed.set(event_target_checked(&ev));
+                    }
+                    prop:checked=move || agreed.get()
+                />
+                <span class="text-sm text-stone-600 leading-relaxed">
+                    "By typing my name above and checking this box, I acknowledge that this constitutes \
+                     my electronic signature on "
+                    <span class="font-medium text-stone-900">{document_name}</span>
+                    ", and I agree to be bound by its terms. I understand this has the same legal \
+                     effect as a handwritten signature under the ESIGN Act (15 U.S.C. § 7001)."
+                </span>
+            </label>
+
+            // Sign button
+            <button
+                type="button"
+                class="btn-primary w-full py-3"
+                disabled=move || !can_sign()
+                on:click=handle_sign
+            >
+                "Sign Document"
+            </button>
+        </div>
     }
 }
