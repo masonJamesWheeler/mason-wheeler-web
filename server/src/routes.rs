@@ -235,6 +235,20 @@ fn maintenance_from_row(row: &rusqlite::Row) -> rusqlite::Result<MaintenanceRequ
     })
 }
 
+fn applicant_from_row(row: &rusqlite::Row) -> rusqlite::Result<Applicant> {
+    Ok(Applicant {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        email: row.get(2)?,
+        phone: row.get(3)?,
+        desired_move_in: row.get(4)?,
+        message: row.get(5)?,
+        status: row.get(6)?,
+        notes: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Shared query helpers
 // ---------------------------------------------------------------------------
@@ -555,28 +569,37 @@ async fn forgot_password(Json(body): Json<ForgotPasswordRequest>) -> Result<impl
     }
 
     // Always return 200 to avoid revealing whether an email exists
-    let db = get_db();
+    // Scope DB access tightly — only hold the lock for SELECT and INSERT
+    let user_and_token = {
+        let db = get_db();
 
-    let user_row = db.query_row(
-        "SELECT id, email FROM users WHERE email = ?1",
-        rusqlite::params![body.email],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    );
-
-    if let Ok((user_id, user_email)) = user_row {
-        let token = Uuid::new_v4().to_string();
-        let id = Uuid::new_v4().to_string();
-        let expires_at = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::hours(1))
-            .expect("valid timestamp")
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string();
-
-        let _ = db.execute(
-            "INSERT INTO password_reset_tokens (id, user_id, token, expires_at) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![id, user_id, token, expires_at],
+        let user_row = db.query_row(
+            "SELECT id, email FROM users WHERE email = ?1",
+            rusqlite::params![body.email],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         );
 
+        if let Ok((user_id, user_email)) = user_row {
+            let token = Uuid::new_v4().to_string();
+            let id = Uuid::new_v4().to_string();
+            let expires_at = chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::hours(1))
+                .expect("valid timestamp")
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
+
+            let _ = db.execute(
+                "INSERT INTO password_reset_tokens (id, user_id, token, expires_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, user_id, token, expires_at],
+            );
+
+            Some((user_email, token))
+        } else {
+            None
+        }
+    }; // db lock dropped here
+
+    if let Some((user_email, token)) = user_and_token {
         let reset_link = format!(
             "https://properties.mason-wheeler.com/reset-password?token={}",
             token
@@ -617,25 +640,30 @@ async fn reset_password(Json(body): Json<ResetPasswordRequest>) -> Result<impl I
         return Err(validation_error("new_password", "Password must be at least 8 characters"));
     }
 
-    let db = get_db();
     let now = chrono::Utc::now()
         .format("%Y-%m-%d %H:%M:%S")
         .to_string();
 
     // Look up the token: must exist, not expired, not used
-    let token_row = db.query_row(
-        "SELECT id, user_id FROM password_reset_tokens WHERE token = ?1 AND used = 0 AND expires_at > ?2",
-        rusqlite::params![body.token, now],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    );
-
-    let (token_id, user_id) = match token_row {
-        Ok(r) => r,
-        Err(_) => return Err(validation_error("token", "Invalid or expired reset token")),
+    // Scope the DB lock tightly so it's dropped before bcrypt hashing
+    let (token_id, user_id) = {
+        let db = get_db();
+        let token_row = db.query_row(
+            "SELECT id, user_id FROM password_reset_tokens WHERE token = ?1 AND used = 0 AND expires_at > ?2",
+            rusqlite::params![body.token, now],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        );
+        match token_row {
+            Ok(r) => r,
+            Err(_) => return Err(validation_error("token", "Invalid or expired reset token")),
+        }
     };
 
-    // Hash the new password
+    // Hash the new password (expensive bcrypt operation — no DB lock held)
     let password_hash = auth::hash_password(&body.new_password);
+
+    // Re-acquire lock for the updates
+    let db = get_db();
 
     // Update user's password
     db.execute(
@@ -1466,7 +1494,8 @@ async fn update_maintenance(
     let _user = require_landlord(&headers)?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    {
+    // Single DB lock for both the update and the email lookup
+    let email_info = {
         let db = get_db();
         let rows = db
             .execute(
@@ -1478,27 +1507,27 @@ async fn update_maintenance(
         if rows == 0 {
             return Err(StatusCode::NOT_FOUND);
         }
-    }
 
-    // Send maintenance update email (non-blocking)
-    {
-        let db2 = get_db();
-        if let Ok((tenant_email, title)) = db2.query_row(
+        db.query_row(
             "SELECT u.email, m.title FROM maintenance_requests m
              JOIN users u ON u.id = m.user_id
              WHERE m.id = ?1",
             rusqlite::params![id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        ) {
-            let status = body.status.clone();
-            tokio::spawn(async move {
-                if let Err(e) =
-                    email::send_maintenance_update(&tenant_email, &title, &status).await
-                {
-                    tracing::error!("Failed to send maintenance update email: {e}");
-                }
-            });
-        }
+        )
+        .ok()
+    }; // db lock dropped here
+
+    // Send maintenance update email (non-blocking)
+    if let Some((tenant_email, title)) = email_info {
+        let status = body.status.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                email::send_maintenance_update(&tenant_email, &title, &status).await
+            {
+                tracing::error!("Failed to send maintenance update email: {e}");
+            }
+        });
     }
 
     Ok(Json(serde_json::json!({ "id": id, "status": body.status })))
@@ -1814,7 +1843,7 @@ async fn stripe_webhook(
                 .as_ref()
                 .and_then(|m| m.get("utility_charge_id").cloned());
 
-            {
+            let tenant_email = {
                 let db = get_db();
 
                 // Idempotency: skip if a payment with this stripe_payment_id already exists
@@ -1870,7 +1899,16 @@ async fn stripe_webhook(
                         );
                     }
                 }
-            } // db lock dropped here
+                // Fetch tenant email in the same DB block
+                user_id.as_ref().and_then(|uid| {
+                    db.query_row(
+                        "SELECT email FROM users WHERE id = ?1",
+                        rusqlite::params![uid],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .ok()
+                })
+            }; // db lock dropped here
 
             tracing::info!(
                 payment_id = %payment_id,
@@ -1879,23 +1917,16 @@ async fn stripe_webhook(
             );
 
             // Send payment confirmation email (non-blocking)
-            if let Some(ref uid) = user_id {
-                let db2 = get_db();
-                if let Ok(tenant_email) = db2.query_row(
-                    "SELECT email FROM users WHERE id = ?1",
-                    rusqlite::params![uid],
-                    |row| row.get::<_, String>(0),
-                ) {
-                    let paid_date = now.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) =
-                            email::send_payment_confirmation(&tenant_email, amount, &paid_date)
-                                .await
-                        {
-                            tracing::error!("Failed to send payment confirmation email: {e}");
-                        }
-                    });
-                }
+            if let Some(tenant_email) = tenant_email {
+                let paid_date = now.clone();
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        email::send_payment_confirmation(&tenant_email, amount, &paid_date)
+                            .await
+                    {
+                        tracing::error!("Failed to send payment confirmation email: {e}");
+                    }
+                });
             }
         }
     }
@@ -2221,13 +2252,18 @@ async fn public_apply(
     if name.is_empty() {
         return validation_error("name", "Name is required").into_response();
     }
-    if email_raw.is_empty() || !email_raw.contains('@') {
+    if !is_valid_email(&email_raw) {
         return validation_error("email", "A valid email is required").into_response();
     }
 
     let id = Uuid::new_v4().to_string();
     let phone = body.phone.as_deref().map(|s| sanitize_input(s));
     let desired_move_in = body.desired_move_in.as_deref().map(|s| sanitize_input(s));
+    if let Some(ref d) = desired_move_in {
+        if !is_valid_date(d) {
+            return validation_error("desired_move_in", "Date must be in YYYY-MM-DD format").into_response();
+        }
+    }
     let message = body.message.as_deref().map(|s| sanitize_input(s));
 
     // DB operation in its own block so MutexGuard is dropped before any .await
@@ -2276,30 +2312,12 @@ async fn admin_list_applicants(headers: HeaderMap) -> Result<Json<Vec<mason_whee
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let applicants = stmt
-        .query_map([], |row| {
-            Ok(mason_wheeler_shared::Applicant {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                email: row.get(2)?,
-                phone: row.get(3)?,
-                desired_move_in: row.get(4)?,
-                message: row.get(5)?,
-                status: row.get(6)?,
-                notes: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        })
+        .query_map([], |row| applicant_from_row(row))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter_map(|r| r.ok())
         .collect::<Vec<_>>();
 
     Ok(Json(applicants))
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateApplicantRequest {
-    status: Option<String>,
-    notes: Option<String>,
 }
 
 async fn admin_update_applicant(
@@ -2320,20 +2338,30 @@ async fn admin_update_applicant(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    if let Some(ref status) = body.status {
-        db.execute(
-            "UPDATE applicants SET status = ?1 WHERE id = ?2",
-            rusqlite::params![status, id],
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    }
-
-    if let Some(ref notes) = body.notes {
-        db.execute(
-            "UPDATE applicants SET notes = ?1 WHERE id = ?2",
-            rusqlite::params![notes, id],
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Combine status and notes into a single UPDATE to avoid non-transactional split
+    match (&body.status, &body.notes) {
+        (Some(status), Some(notes)) => {
+            db.execute(
+                "UPDATE applicants SET status = ?1, notes = ?2 WHERE id = ?3",
+                rusqlite::params![status, notes, id],
+            )
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        (Some(status), None) => {
+            db.execute(
+                "UPDATE applicants SET status = ?1 WHERE id = ?2",
+                rusqlite::params![status, id],
+            )
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        (None, Some(notes)) => {
+            db.execute(
+                "UPDATE applicants SET notes = ?1 WHERE id = ?2",
+                rusqlite::params![notes, id],
+            )
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        (None, None) => {}
     }
 
     Ok(Json(serde_json::json!({"message": "Applicant updated"})))

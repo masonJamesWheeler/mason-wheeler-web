@@ -63,7 +63,7 @@ pub fn HomePage() -> impl IntoView {
                 </div>
                 // Gallery link overlay
                 <a href="/gallery" class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-stone-800 text-sm font-medium px-4 py-2 rounded-xl hover:bg-white transition-colors shadow-lg">
-                    "View all 23 photos"
+                    "View all photos"
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                     </svg>

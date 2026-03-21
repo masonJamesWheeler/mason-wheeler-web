@@ -250,6 +250,12 @@ pub struct CreateApplicantRequest {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateApplicantRequest {
+    pub status: Option<String>,
+    pub notes: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Admin Reports
 // ---------------------------------------------------------------------------

@@ -198,6 +198,10 @@ fn create_tables(conn: &Connection) {
             notes TEXT,
             created_at TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE INDEX IF NOT EXISTS idx_payments_stripe_id ON payments(stripe_payment_id);
+        CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token);
+        CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
         ",
     )
     .expect("Failed to create tables");

@@ -1,37 +1,37 @@
 use leptos::prelude::*;
 
+// (filename, alt text, category)
+const PHOTOS: &[(&str, &str, &str)] = &[
+    ("exterior-front-walkway-sunny.jpg", "Front of home, sunny day", "Exterior"),
+    ("exterior-front-street-view-sunny.jpg", "Street view with mature tree", "Exterior"),
+    ("exterior-front-close-up.jpg", "Front facade close-up", "Exterior"),
+    ("exterior-side-yard-corner-lot.jpg", "Side yard, corner lot", "Exterior"),
+    ("exterior-side-lawn-landscaping.jpg", "Side lawn with landscaping", "Exterior"),
+    ("living-room-fireplace-wide.jpg", "Living room with stone fireplace", "Living Room"),
+    ("living-room-fireplace-angle-2.jpg", "Living room, alternate angle", "Living Room"),
+    ("living-room-fireplace-closeup.jpg", "Stone fireplace detail", "Living Room"),
+    ("living-room-windows-seating.jpg", "Living room seating area", "Living Room"),
+    ("living-room-entry-kitchen-view.jpg", "Living room toward kitchen", "Living Room"),
+    ("living-room-front-door-entry.jpg", "Entry and front door", "Living Room"),
+    ("kitchen-dining-nook-wide.jpg", "Kitchen with dining nook", "Kitchen"),
+    ("kitchen-range-hood-appliances.jpg", "Kitchen appliances and range hood", "Kitchen"),
+    ("kitchen-gas-range-subway-tile.jpg", "Gas range with subway tile", "Kitchen"),
+    ("bedroom-1-primary-dark-furniture.jpg", "Primary bedroom", "Bedrooms"),
+    ("bedroom-2-queen-green-accent.jpg", "Second bedroom, green accent wall", "Bedrooms"),
+    ("den-wide-shelves-tv.jpg", "Den with shelving and TV area", "Den"),
+    ("den-sliding-doors-stairs.jpg", "Den with sliding doors to yard", "Den"),
+    ("den-sliding-doors-backyard-view.jpg", "Den, backyard view", "Den"),
+    ("backyard-firepit-shed-fence.jpg", "Backyard fire pit and shed", "Outdoor"),
+    ("backyard-sliding-doors-patio.jpg", "Patio with chairs", "Outdoor"),
+    ("aerial-drone-rear-yard.jpg", "Aerial view, rear of property", "Aerial"),
+    ("aerial-drone-overhead-lot-outline.jpg", "Overhead lot view", "Aerial"),
+];
+
 #[component]
 pub fn GalleryPage() -> impl IntoView {
     let (selected, set_selected) = signal::<Option<usize>>(None);
 
-    let photos: Vec<(&str, &str, &str)> = vec![
-        // (filename, alt text, category)
-        ("exterior-front-walkway-sunny.jpg", "Front of home, sunny day", "Exterior"),
-        ("exterior-front-street-view-sunny.jpg", "Street view with mature tree", "Exterior"),
-        ("exterior-front-close-up.jpg", "Front facade close-up", "Exterior"),
-        ("exterior-side-yard-corner-lot.jpg", "Side yard, corner lot", "Exterior"),
-        ("exterior-side-lawn-landscaping.jpg", "Side lawn with landscaping", "Exterior"),
-        ("living-room-fireplace-wide.jpg", "Living room with stone fireplace", "Living Room"),
-        ("living-room-fireplace-angle-2.jpg", "Living room, alternate angle", "Living Room"),
-        ("living-room-fireplace-closeup.jpg", "Stone fireplace detail", "Living Room"),
-        ("living-room-windows-seating.jpg", "Living room seating area", "Living Room"),
-        ("living-room-entry-kitchen-view.jpg", "Living room toward kitchen", "Living Room"),
-        ("living-room-front-door-entry.jpg", "Entry and front door", "Living Room"),
-        ("kitchen-dining-nook-wide.jpg", "Kitchen with dining nook", "Kitchen"),
-        ("kitchen-range-hood-appliances.jpg", "Kitchen appliances and range hood", "Kitchen"),
-        ("kitchen-gas-range-subway-tile.jpg", "Gas range with subway tile", "Kitchen"),
-        ("bedroom-1-primary-dark-furniture.jpg", "Primary bedroom", "Bedrooms"),
-        ("bedroom-2-queen-green-accent.jpg", "Second bedroom, green accent wall", "Bedrooms"),
-        ("den-wide-shelves-tv.jpg", "Den with shelving and TV area", "Den"),
-        ("den-sliding-doors-stairs.jpg", "Den with sliding doors to yard", "Den"),
-        ("den-sliding-doors-backyard-view.jpg", "Den, backyard view", "Den"),
-        ("backyard-firepit-shed-fence.jpg", "Backyard fire pit and shed", "Outdoor"),
-        ("backyard-sliding-doors-patio.jpg", "Patio with chairs", "Outdoor"),
-        ("aerial-drone-rear-yard.jpg", "Aerial view, rear of property", "Aerial"),
-        ("aerial-drone-overhead-lot-outline.jpg", "Overhead lot view", "Aerial"),
-    ];
-
-    let photo_count = photos.len();
+    let photo_count = PHOTOS.len();
 
     view! {
         <div class="max-w-6xl mx-auto px-6 py-10">
@@ -43,7 +43,7 @@ pub fn GalleryPage() -> impl IntoView {
 
             // Photo grid
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                {photos.iter().enumerate().map(|(i, (file, alt, _cat))| {
+                {PHOTOS.iter().enumerate().map(|(i, (file, alt, _cat))| {
                     let file = file.to_string();
                     let alt = alt.to_string();
                     view! {
@@ -116,34 +116,8 @@ pub fn GalleryPage() -> impl IntoView {
 
                 // Image
                 {move || {
-                    let photos_inner: Vec<(&str, &str, &str)> = vec![
-                        ("exterior-front-walkway-sunny.jpg", "Front of home, sunny day", "Exterior"),
-                        ("exterior-front-street-view-sunny.jpg", "Street view with mature tree", "Exterior"),
-                        ("exterior-front-close-up.jpg", "Front facade close-up", "Exterior"),
-                        ("exterior-side-yard-corner-lot.jpg", "Side yard, corner lot", "Exterior"),
-                        ("exterior-side-lawn-landscaping.jpg", "Side lawn with landscaping", "Exterior"),
-                        ("living-room-fireplace-wide.jpg", "Living room with stone fireplace", "Living Room"),
-                        ("living-room-fireplace-angle-2.jpg", "Living room, alternate angle", "Living Room"),
-                        ("living-room-fireplace-closeup.jpg", "Stone fireplace detail", "Living Room"),
-                        ("living-room-windows-seating.jpg", "Living room seating area", "Living Room"),
-                        ("living-room-entry-kitchen-view.jpg", "Living room toward kitchen", "Living Room"),
-                        ("living-room-front-door-entry.jpg", "Entry and front door", "Living Room"),
-                        ("kitchen-dining-nook-wide.jpg", "Kitchen with dining nook", "Kitchen"),
-                        ("kitchen-range-hood-appliances.jpg", "Kitchen appliances and range hood", "Kitchen"),
-                        ("kitchen-gas-range-subway-tile.jpg", "Gas range with subway tile", "Kitchen"),
-                        ("bedroom-1-primary-dark-furniture.jpg", "Primary bedroom", "Bedrooms"),
-                        ("bedroom-2-queen-green-accent.jpg", "Second bedroom, green accent wall", "Bedrooms"),
-                        ("den-wide-shelves-tv.jpg", "Den with shelving and TV area", "Den"),
-                        ("den-sliding-doors-stairs.jpg", "Den with sliding doors to yard", "Den"),
-                        ("den-sliding-doors-backyard-view.jpg", "Den, backyard view", "Den"),
-                        ("backyard-firepit-shed-fence.jpg", "Backyard fire pit and shed", "Outdoor"),
-                        ("backyard-sliding-doors-patio.jpg", "Patio with chairs", "Outdoor"),
-                        ("aerial-drone-rear-yard.jpg", "Aerial view, rear of property", "Aerial"),
-                        ("aerial-drone-overhead-lot-outline.jpg", "Overhead lot view", "Aerial"),
-                    ];
-
                     selected.get().map(|idx| {
-                        let (file, alt, cat) = photos_inner[idx];
+                        let (file, alt, _cat) = PHOTOS[idx];
                         view! {
                             <div class="flex flex-col items-center max-w-5xl max-h-[85vh] px-16" on:click=move |e| e.stop_propagation()>
                                 <img
