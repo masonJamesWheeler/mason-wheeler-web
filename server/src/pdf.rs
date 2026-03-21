@@ -318,6 +318,316 @@ pub fn generate_deposit_receipt_pdf(
 // Payment Receipt PDF
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Residential Lease Agreement PDF
+// ---------------------------------------------------------------------------
+
+pub struct LeaseParams {
+    pub landlord_name: String,
+    pub landlord_address: String,
+    pub tenant_names: Vec<String>,
+    pub rent_amount: f64,
+    pub security_deposit: f64,
+    pub pet_deposit: f64,
+    pub lease_start: String,
+    pub lease_end: String,
+    pub move_in_date: String,
+    pub max_occupants: u32,
+    pub pets_description: String,
+    pub rrio_number: String,
+    pub depository_name: String,
+    pub depository_address: String,
+}
+
+pub fn generate_lease_pdf(p: &LeaseParams) -> Result<Vec<u8>, anyhow::Error> {
+    let mut doc = new_doc("Residential Lease Agreement")?;
+    let tenant_list = p.tenant_names.join(", ");
+    let total_deposit = p.security_deposit + p.pet_deposit;
+
+    // ── Title ──
+    doc.push(title_paragraph("RESIDENTIAL LEASE AGREEMENT"));
+    doc.push(Break::new(0.3));
+    doc.push(body_paragraph("State of Washington — City of Seattle"));
+    doc.push(Break::new(1.0));
+
+    // ── 1. Parties ──
+    doc.push(heading_paragraph("1. PARTIES"));
+    doc.push(body_paragraph(&format!(
+        "This Residential Lease Agreement (\"Lease\") is entered into between {} (\"Landlord\"), \
+         with a mailing address of {}, and {} (\"Tenant\"), collectively referred to as the \"Parties.\"",
+        p.landlord_name, p.landlord_address, tenant_list
+    )));
+    doc.push(Break::new(0.5));
+
+    // ── 2. Property ──
+    doc.push(heading_paragraph("2. PROPERTY"));
+    doc.push(body_paragraph(&format!(
+        "Landlord agrees to rent to Tenant the property located at {} (\"Premises\"), \
+         a single-family residence, for use as a private dwelling only.",
+        PROPERTY_ADDRESS
+    )));
+    doc.push(Break::new(0.5));
+
+    // ── 3. Term ──
+    doc.push(heading_paragraph("3. TERM"));
+    doc.push(body_paragraph(&format!(
+        "This Lease begins on {} and ends on {}, for a total term of twelve (12) months. \
+         Upon expiration, this Lease shall automatically convert to a month-to-month tenancy \
+         under the same terms unless either party provides written notice as required by law.",
+        p.lease_start, p.lease_end
+    )));
+    doc.push(Break::new(0.5));
+
+    // ── 4. Rent ──
+    doc.push(heading_paragraph("4. RENT"));
+    doc.push(body_paragraph(&format!(
+        "Tenant shall pay Landlord a monthly rent of ${:.2}. Rent is due on the first (1st) day \
+         of each month. Rent may be paid electronically via the property management portal at \
+         properties.mason-wheeler.com, or by check or money order delivered to the Landlord's \
+         mailing address.",
+        p.rent_amount
+    )));
+    doc.push(Break::new(0.3));
+    doc.push(body_paragraph(
+        "A five (5) day grace period applies to all electronic payments per Washington State law \
+         (RCW 59.18). No late fee shall be assessed during this grace period. After the grace period, \
+         a late fee of $75.00 shall be assessed. Landlord shall apply all payments to rent first \
+         before applying to other charges (RCW 59.18.283)."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 5. Security Deposit ──
+    doc.push(heading_paragraph("5. SECURITY DEPOSIT"));
+    doc.push(body_paragraph(&format!(
+        "Upon execution of this Lease, Tenant shall pay a security deposit of ${:.2}{}. \
+         The total of all deposits and nonrefundable fees shall not exceed one month's rent \
+         per Seattle Municipal Code. Tenant may request to pay the deposit in installments.",
+        p.security_deposit,
+        if p.pet_deposit > 0.0 {
+            format!(" and a pet deposit of ${:.2} (total: ${:.2})", p.pet_deposit, total_deposit)
+        } else {
+            String::new()
+        }
+    )));
+    doc.push(Break::new(0.3));
+    doc.push(body_paragraph(&format!(
+        "The deposit shall be held at {} located at {}. \
+         The deposit, or portion thereof, shall be returned within twenty-one (21) days after \
+         the tenancy ends and the Tenant has vacated, along with a full and specific statement \
+         of the basis for any deductions (RCW 59.18.280).",
+        p.depository_name, p.depository_address
+    )));
+    doc.push(Break::new(0.3));
+    doc.push(body_paragraph(
+        "FEE-IN-LIEU OPTION: Per RCW 59.18.610, Tenant has the option to pay a nonrefundable \
+         fee in lieu of a security deposit. Tenant may contact Landlord for details on this option."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 6. Move-In Checklist ──
+    doc.push(heading_paragraph("6. MOVE-IN CONDITION CHECKLIST"));
+    doc.push(body_paragraph(
+        "Prior to move-in, Landlord and Tenant shall jointly complete a written checklist \
+         describing the condition and cleanliness of the Premises, including all furnishings \
+         and appliances, as required by RCW 59.18.260. This checklist is incorporated by \
+         reference into this Lease."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 7. Occupancy ──
+    doc.push(heading_paragraph("7. OCCUPANCY"));
+    doc.push(body_paragraph(&format!(
+        "The Premises shall be occupied only by the following named Tenants: {}. \
+         Maximum occupancy is {} persons. Guests staying longer than fourteen (14) consecutive \
+         days must be approved in writing by Landlord. No subletting or assignment of this Lease, \
+         including short-term rental listings (e.g., Airbnb), is permitted without prior written \
+         consent of Landlord.",
+        tenant_list, p.max_occupants
+    )));
+    doc.push(Break::new(0.5));
+
+    // ── 8. Pets ──
+    doc.push(heading_paragraph("8. PETS"));
+    if p.pets_description.is_empty() {
+        doc.push(body_paragraph("No pets are authorized under this Lease."));
+    } else {
+        doc.push(body_paragraph(&format!(
+            "The following pets are authorized: {}. Tenant is responsible for all damage caused \
+             by pets beyond normal wear and tear. A maximum of two (2) pets is permitted unless \
+             otherwise agreed in writing. Tenant shall comply with all local animal control laws.",
+            p.pets_description
+        )));
+    }
+    doc.push(Break::new(0.5));
+
+    // ── 9. Maintenance and Repairs ──
+    doc.push(heading_paragraph("9. MAINTENANCE AND REPAIRS"));
+    doc.push(body_paragraph(
+        "Landlord shall maintain the Premises in compliance with all applicable building and \
+         housing codes (RCW 59.18.060). Landlord shall commence remedial action within: \
+         24 hours for loss of hot/cold water, heat, electricity, or imminent safety hazards; \
+         72 hours for loss of refrigerator, range/oven, or major plumbing fixtures; and \
+         10 days for all other repairs."
+    ));
+    doc.push(Break::new(0.3));
+    doc.push(body_paragraph(
+        "Tenant shall maintain the Premises in a clean and sanitary condition, properly dispose \
+         of garbage, and promptly notify Landlord of any maintenance issues within 48 hours of \
+         discovery. Maintenance requests shall be submitted through the property management \
+         portal at properties.mason-wheeler.com."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 10. Landlord Access ──
+    doc.push(heading_paragraph("10. LANDLORD ACCESS"));
+    doc.push(body_paragraph(
+        "Landlord may enter the Premises with at least two (2) days' written notice for repairs \
+         and maintenance, and one (1) day's notice for showing the property to prospective tenants \
+         or buyers. In case of emergency, Landlord may enter without notice. Entry shall be at \
+         reasonable times (RCW 59.18.150)."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 11. Utilities ──
+    doc.push(heading_paragraph("11. UTILITIES"));
+    doc.push(body_paragraph(
+        "Tenant shall be responsible for all utilities including electricity, gas, water/sewer, \
+         garbage, and internet/cable unless otherwise agreed. Landlord may pass through utility \
+         costs with documentation of the actual charges. No markup shall be applied to utility \
+         pass-through charges."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 12. Renter's Insurance ──
+    doc.push(heading_paragraph("12. RENTER'S INSURANCE"));
+    doc.push(body_paragraph(
+        "Tenant is required to maintain renter's insurance throughout the term of this Lease \
+         with a minimum liability coverage of $100,000. Tenant shall provide proof of insurance \
+         to Landlord prior to move-in and upon renewal. Landlord's insurance does not cover \
+         Tenant's personal property."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 13. Prohibited Activities ──
+    doc.push(heading_paragraph("13. PROHIBITED ACTIVITIES"));
+    doc.push(body_paragraph(
+        "The following are prohibited on the Premises: (a) smoking or vaping indoors; \
+         (b) illegal activity of any kind; (c) use of space heaters or unattended candles; \
+         (d) removal of smoke detector or CO detector batteries; (e) any activity that would \
+         void the Landlord's insurance policy or violate local ordinances."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 14. Rent Increases ──
+    doc.push(heading_paragraph("14. RENT INCREASES"));
+    doc.push(body_paragraph(
+        "Rent shall not be increased during the initial Lease term. For any subsequent \
+         month-to-month tenancy, Landlord shall provide at least 180 days' written notice \
+         before any rent increase, per Seattle Municipal Code. Annual rent increases shall \
+         not exceed the maximum allowed under Washington State law (HB 1217: 7% + CPI, \
+         capped at 10%)."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 15. Termination ──
+    doc.push(heading_paragraph("15. TERMINATION AND JUST CAUSE"));
+    doc.push(body_paragraph(
+        "This Lease may only be terminated for just cause as defined by Seattle's Just Cause \
+         Eviction Ordinance (SMC 22.206.160). Landlord must provide written notice stating \
+         the specific just cause and supporting facts. For nonpayment of rent, Landlord shall \
+         provide a 14-day pay-or-vacate notice per RCW 59.18.057. For month-to-month tenancy, \
+         Landlord shall provide at least 20 days' written notice to terminate."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 16. Lead Paint ──
+    doc.push(heading_paragraph("16. LEAD-BASED PAINT DISCLOSURE"));
+    doc.push(body_paragraph(
+        "The Premises were built before 1978. Tenant acknowledges receipt of the EPA pamphlet \
+         \"Protect Your Family from Lead in Your Home\" and the Lead-Based Paint Disclosure \
+         form, which is incorporated by reference into this Lease."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 17. Mold ──
+    doc.push(heading_paragraph("17. MOLD DISCLOSURE"));
+    doc.push(body_paragraph(
+        "Tenant acknowledges receipt of written information about the health hazards associated \
+         with exposure to indoor mold, including how to prevent mold growth, as required by \
+         RCW 59.18.060(13)."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 18. RRIO ──
+    doc.push(heading_paragraph("18. RENTAL REGISTRATION"));
+    doc.push(body_paragraph(&format!(
+        "This property is registered under Seattle's Rental Registration & Inspection Ordinance \
+         (RRIO). Registration number: {}.",
+        if p.rrio_number.is_empty() { "Pending" } else { &p.rrio_number }
+    )));
+    doc.push(Break::new(0.5));
+
+    // ── 19. Landlord Contact ──
+    doc.push(heading_paragraph("19. LANDLORD CONTACT INFORMATION"));
+    doc.push(body_paragraph(&format!("Name: {}", p.landlord_name)));
+    doc.push(body_paragraph(&format!("Mailing Address: {}", p.landlord_address)));
+    doc.push(body_paragraph("Email: masonwheeler@fieldflow.us"));
+    doc.push(Break::new(0.5));
+
+    // ── 20. Governing Law ──
+    doc.push(heading_paragraph("20. GOVERNING LAW"));
+    doc.push(body_paragraph(
+        "This Lease shall be governed by the laws of the State of Washington, including the \
+         Residential Landlord-Tenant Act (RCW 59.18), Seattle Municipal Code, and all applicable \
+         local ordinances. Any provision of this Lease that conflicts with applicable law shall \
+         be void and the law shall govern."
+    ));
+    doc.push(Break::new(0.5));
+
+    // ── 21. Entire Agreement ──
+    doc.push(heading_paragraph("21. ENTIRE AGREEMENT"));
+    doc.push(body_paragraph(
+        "This Lease, together with the Move-In Condition Checklist, Lead-Based Paint Disclosure, \
+         and all other referenced documents, constitutes the entire agreement between the Parties. \
+         No oral agreements or representations shall be binding. Any modifications must be in \
+         writing and signed by both Parties."
+    ));
+    doc.push(Break::new(1.0));
+
+    // ── Signatures ──
+    doc.push(heading_paragraph("SIGNATURES"));
+    doc.push(Break::new(0.5));
+    doc.push(body_paragraph(
+        "By signing below, the Parties acknowledge that they have read and agree to all terms \
+         and conditions of this Lease."
+    ));
+    doc.push(Break::new(1.0));
+
+    doc.push(body_paragraph(&format!("Landlord: {}", p.landlord_name)));
+    doc.push(body_paragraph(
+        "________________________________________     ________________",
+    ));
+    doc.push(body_paragraph("Landlord Signature                                         Date"));
+    doc.push(Break::new(1.5));
+
+    for name in &p.tenant_names {
+        doc.push(body_paragraph(&format!("Tenant: {}", name)));
+        doc.push(body_paragraph(
+            "________________________________________     ________________",
+        ));
+        doc.push(body_paragraph("Tenant Signature                                            Date"));
+        doc.push(Break::new(1.5));
+    }
+
+    let mut buf = Vec::new();
+    doc.render(&mut buf)?;
+    Ok(buf)
+}
+
+// ---------------------------------------------------------------------------
+// Payment Receipt PDF
+// ---------------------------------------------------------------------------
+
 pub fn generate_payment_receipt_pdf(
     tenant_name: &str,
     amount: f64,
