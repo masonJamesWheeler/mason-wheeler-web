@@ -37,9 +37,13 @@ wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = [
     "Window", "Document", "HtmlDocument", "Location", "Storage",
     "HtmlInputElement", "HtmlFormElement", "FormData", "File", "FileList",
-    "SubmitEvent", "Event", "MouseEvent",
+    "SubmitEvent", "Event", "MouseEvent", "TouchEvent", "Touch", "TouchList",
+    "HtmlCanvasElement", "CanvasRenderingContext2d", "DomRect",
+    "UrlSearchParams",
+    "RequestInit", "Request", "Response", "Headers",
 ] }
 gloo-net = { version = "0.6", optional = true }
+gloo-timers = { version = "0.3", optional = true, features = ["futures"] }
 
 [features]
 hydrate = [
@@ -48,6 +52,7 @@ hydrate = [
     "wasm-bindgen",
     "web-sys",
     "gloo-net",
+    "gloo-timers",
 ]
 ssr = [
     "axum",

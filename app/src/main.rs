@@ -4,7 +4,6 @@ async fn main() {
     use axum::Router;
     use leptos_axum::{file_and_error_handler, generate_route_list, LeptosRoutes};
     use mason_wheeler_app::app::{shell, App};
-    use tower_http::services::ServeDir;
     use tracing_subscriber::EnvFilter;
 
     dotenvy::dotenv().ok();
@@ -31,9 +30,6 @@ async fn main() {
     // Build API router
     let api_router = mason_wheeler_server::routes::api_router();
 
-    // Serve photos from the data directory
-    let photos_service = ServeDir::new("data/photos");
-
     let leptos_router = Router::<leptos::config::LeptosOptions>::new()
         .leptos_routes(&leptos_options, routes, {
             let leptos_options = leptos_options.clone();
@@ -43,8 +39,7 @@ async fn main() {
         .with_state(leptos_options);
 
     let app = leptos_router
-        .nest("/api", api_router)
-        .nest_service("/photos", photos_service);
+        .nest("/api", api_router);
 
     tracing::info!("Starting server at http://{}", addr);
 

@@ -26,7 +26,7 @@ pub fn AdminDashboard() -> impl IntoView {
 
             // Stats row
             <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10">
-                <div class="card">
+                <div class="card p-6">
                     <p class="stat-label">"Rent Status"</p>
                     {move || match data.get() {
                         Some(d) if d.amount_due > 0.0 => view! {
@@ -43,21 +43,21 @@ pub fn AdminDashboard() -> impl IntoView {
                         }.into_any(),
                     }}
                 </div>
-                <div class="card">
+                <div class="card p-6">
                     <p class="stat-label">"Active Maintenance"</p>
                     <p class="text-2xl font-bold text-stone-900 mt-1">
                         {move || data.get().map(|d| d.active_maintenance.len()).unwrap_or(0)}
                     </p>
                     <p class="text-xs text-stone-400 mt-1">"Open requests"</p>
                 </div>
-                <div class="card">
+                <div class="card p-6">
                     <p class="stat-label">"Outstanding Utilities"</p>
                     <p class="text-2xl font-bold text-stone-900 mt-1">
                         {move || {
                             data.get()
                                 .map(|d| {
                                     let total: f64 = d.utility_charges.iter().map(|u| u.amount).sum();
-                                    format!("${:.2}", total)
+                                    format!("${:.2}", total.abs())
                                 })
                                 .unwrap_or_else(|| "...".to_string())
                         }}
@@ -67,10 +67,10 @@ pub fn AdminDashboard() -> impl IntoView {
             </div>
 
             // Quick Actions
-            <h2 class="section-title">"Quick Actions"</h2>
+            <h2 class="section-title mb-5">"Quick Actions"</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <A href="/admin/payments"
-                    attr:class="card-hover group flex items-center justify-between"
+                    attr:class="card card-hover p-6 group flex items-center justify-between"
                 >
                     <div>
                         <p class="font-semibold text-lg text-stone-900">"Manage Payments"</p>
@@ -81,7 +81,7 @@ pub fn AdminDashboard() -> impl IntoView {
                     </svg>
                 </A>
                 <A href="/admin/maintenance"
-                    attr:class="card-hover group flex items-center justify-between"
+                    attr:class="card card-hover p-6 group flex items-center justify-between"
                 >
                     <div>
                         <p class="font-semibold text-lg text-stone-900">"Maintenance Requests"</p>
@@ -92,7 +92,7 @@ pub fn AdminDashboard() -> impl IntoView {
                     </svg>
                 </A>
                 <A href="/admin/documents"
-                    attr:class="card-hover group flex items-center justify-between"
+                    attr:class="card card-hover p-6 group flex items-center justify-between"
                 >
                     <div>
                         <p class="font-semibold text-lg text-stone-900">"Documents"</p>
@@ -103,7 +103,7 @@ pub fn AdminDashboard() -> impl IntoView {
                     </svg>
                 </A>
                 <A href="/admin/payments"
-                    attr:class="card-hover group flex items-center justify-between !bg-amber-500 hover:!bg-amber-600 !border-amber-500"
+                    attr:class="card p-6 group flex items-center justify-between bg-amber-500 hover:bg-amber-600 border-amber-500 hover:shadow-lg hover:shadow-amber-500/20 hover:-translate-y-0.5 transition-all"
                 >
                     <div>
                         <p class="font-semibold text-lg text-white">"Add Utility Charge"</p>

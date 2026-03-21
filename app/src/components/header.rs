@@ -5,21 +5,25 @@ use leptos_router::components::A;
 pub fn Header() -> impl IntoView {
     let (mobile_open, set_mobile_open) = signal(false);
 
-    // Check current path to conditionally hide sign-in on login page
+    // Check current path to conditionally show/hide nav items
     #[cfg(feature = "hydrate")]
-    let is_login = {
-        let (val, set_val) = signal(false);
+    let (is_login, is_admin) = {
+        let (login_val, set_login_val) = signal(false);
+        let (admin_val, set_admin_val) = signal(false);
         leptos::task::spawn_local(async move {
             if let Some(window) = web_sys::window() {
                 if let Ok(path) = window.location().pathname() {
-                    set_val.set(path == "/login");
+                    set_login_val.set(path == "/login");
+                    set_admin_val.set(path.starts_with("/admin"));
                 }
             }
         });
-        val
+        (login_val, admin_val)
     };
     #[cfg(not(feature = "hydrate"))]
     let is_login = signal(false).0;
+    #[cfg(not(feature = "hydrate"))]
+    let is_admin = signal(false).0;
 
     view! {
         <header class="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-stone-200/60">
@@ -33,9 +37,16 @@ pub fn Header() -> impl IntoView {
                     <span class="hidden sm:block text-sm font-semibold text-stone-900 leading-none">"8404 12th Ave S"</span>
                 </A>
 
-                // Desktop nav — hide sign-in on login page
+                // Desktop nav
                 <nav class="hidden md:flex items-center gap-1">
-                    <Show when=move || !is_login.get()>
+                    <Show when=move || is_admin.get()>
+                        <A href="/admin" attr:class="text-sm font-medium text-stone-600 hover:text-stone-900 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">"Dashboard"</A>
+                        <A href="/admin/tenants" attr:class="text-sm font-medium text-stone-600 hover:text-stone-900 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">"Tenants"</A>
+                        <A href="/admin/payments" attr:class="text-sm font-medium text-stone-600 hover:text-stone-900 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">"Payments"</A>
+                        <A href="/admin/maintenance" attr:class="text-sm font-medium text-stone-600 hover:text-stone-900 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">"Maintenance"</A>
+                        <A href="/admin/documents" attr:class="text-sm font-medium text-stone-600 hover:text-stone-900 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">"Documents"</A>
+                    </Show>
+                    <Show when=move || !is_login.get() && !is_admin.get()>
                         <A href="/login" attr:class="btn-primary text-sm px-4 py-2">
                             "Sign in"
                         </A>
@@ -63,7 +74,14 @@ pub fn Header() -> impl IntoView {
             // Mobile nav
             <Show when=move || mobile_open.get()>
                 <nav class="md:hidden border-t border-stone-100 px-6 py-4 bg-white space-y-1">
-                    <Show when=move || !is_login.get()>
+                    <Show when=move || is_admin.get()>
+                        <A href="/admin" attr:class="block py-2.5 px-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">"Dashboard"</A>
+                        <A href="/admin/tenants" attr:class="block py-2.5 px-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">"Tenants"</A>
+                        <A href="/admin/payments" attr:class="block py-2.5 px-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">"Payments"</A>
+                        <A href="/admin/maintenance" attr:class="block py-2.5 px-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">"Maintenance"</A>
+                        <A href="/admin/documents" attr:class="block py-2.5 px-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">"Documents"</A>
+                    </Show>
+                    <Show when=move || !is_login.get() && !is_admin.get()>
                         <A href="/login" attr:class="block py-2.5 px-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">"Sign in"</A>
                     </Show>
                 </nav>

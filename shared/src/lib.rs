@@ -85,6 +85,21 @@ pub struct Document {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TenantUser {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateTenantRequest {
+    pub email: String,
+    pub password: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,

@@ -22,6 +22,12 @@ pub fn init_db() {
     conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
     conn.execute_batch("PRAGMA foreign_keys=ON;").ok();
 
+    // Ensure the documents upload directory exists
+    std::fs::create_dir_all("data/documents").expect("Failed to create data/documents directory");
+
+    // Ensure the signatures directory exists
+    std::fs::create_dir_all("data/signatures").expect("Failed to create data/signatures directory");
+
     create_tables(&conn);
     seed_default_landlord(&conn);
 
@@ -149,6 +155,16 @@ fn create_tables(conn: &Connection) {
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS signatures (
+            id TEXT PRIMARY KEY,
+            document_type TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            signer_role TEXT NOT NULL,
+            signer_name TEXT NOT NULL,
+            signature_path TEXT NOT NULL,
+            signed_at TEXT DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS landlord_contact (
             id TEXT PRIMARY KEY DEFAULT 'main',
             name TEXT NOT NULL,
@@ -158,6 +174,15 @@ fn create_tables(conn: &Connection) {
             emergency_contact TEXT,
             emergency_phone TEXT,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            token TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            used INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
         );
         ",
     )

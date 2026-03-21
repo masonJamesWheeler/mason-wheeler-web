@@ -19,7 +19,7 @@ pub fn shell(options: leptos::config::LeptosOptions) -> impl IntoView {
                 <HydrationScripts options />
                 <MetaTags />
             </head>
-            <body class="min-h-screen bg-stone-50">
+            <body class="min-h-screen flex flex-col bg-stone-50 text-stone-900">
                 <App />
             </body>
         </html>
@@ -36,10 +36,12 @@ pub fn App() -> impl IntoView {
 
         <Router>
             <Header />
-            <main class="flex-grow">
+            <main class="flex-1">
                 <Routes fallback=|| view! { <p class="p-8 text-center">"Page not found."</p> }>
                     <Route path=path!("/") view=pages::home::HomePage />
                     <Route path=path!("/login") view=pages::login::LoginPage />
+                    <Route path=path!("/forgot-password") view=pages::forgot_password::ForgotPasswordPage />
+                    <Route path=path!("/reset-password") view=pages::reset_password::ResetPasswordPage />
                     <Route path=path!("/tenant") view=pages::tenant::dashboard::TenantDashboard />
                     <Route path=path!("/tenant/payments") view=pages::tenant::payments::TenantPayments />
                     <Route path=path!("/tenant/documents") view=pages::tenant::documents::TenantDocuments />
@@ -48,6 +50,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/admin/payments") view=pages::admin::payments::AdminPayments />
                     <Route path=path!("/admin/documents") view=pages::admin::documents::AdminDocuments />
                     <Route path=path!("/admin/maintenance") view=pages::admin::maintenance::AdminMaintenance />
+                    <Route path=path!("/admin/tenants") view=pages::admin::tenants::AdminTenants />
                 </Routes>
             </main>
             <Footer />

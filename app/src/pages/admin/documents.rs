@@ -2,6 +2,56 @@
 use leptos::prelude::*;
 use mason_wheeler_shared::Document;
 
+#[cfg(feature = "hydrate")]
+fn fetch_documents(set_documents: WriteSignal<Vec<Document>>) {
+    leptos::task::spawn_local(async move {
+        if let Ok(resp) = gloo_net::http::Request::get("/api/documents").send().await {
+            if let Ok(data) = resp.json::<Vec<Document>>().await {
+                set_documents.set(data);
+            }
+        }
+    });
+}
+
+#[cfg(feature = "hydrate")]
+fn upload_file(dtype: String, file: web_sys::File, set_documents: WriteSignal<Vec<Document>>) {
+    leptos::task::spawn_local(async move {
+        let form_data = web_sys::FormData::new().unwrap();
+        let _ = form_data.append_with_blob_and_filename("file", &file, &file.name());
+        let _ = form_data.append_with_str("doc_type", &dtype);
+        let _ = form_data.append_with_str("name", &file.name());
+
+        let mut opts = web_sys::RequestInit::new();
+        opts.method("POST");
+        opts.body(Some(&form_data));
+
+        let request = web_sys::Request::new_with_str_and_init("/api/documents/upload", &opts).unwrap();
+
+        let window = web_sys::window().unwrap();
+        if let Ok(resp_val) = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request)).await {
+            let resp: web_sys::Response = resp_val.into();
+            if resp.ok() {
+                // Refresh documents list
+                fetch_documents(set_documents);
+            }
+        }
+    });
+}
+
+#[cfg(feature = "hydrate")]
+fn delete_doc(id: String, set_documents: WriteSignal<Vec<Document>>) {
+    leptos::task::spawn_local(async move {
+        if let Ok(resp) = gloo_net::http::Request::delete(&format!("/api/documents/{}", id))
+            .send()
+            .await
+        {
+            if resp.ok() {
+                fetch_documents(set_documents);
+            }
+        }
+    });
+}
+
 #[allow(unused)]
 #[component]
 pub fn AdminDocuments() -> impl IntoView {
@@ -9,13 +59,7 @@ pub fn AdminDocuments() -> impl IntoView {
 
     #[cfg(feature = "hydrate")]
     {
-        leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/documents").send().await {
-                if let Ok(data) = resp.json::<Vec<Document>>().await {
-                    set_documents.set(data);
-                }
-            }
-        });
+        fetch_documents(set_documents);
     }
 
     let doc_types = vec![
@@ -51,16 +95,20 @@ pub fn AdminDocuments() -> impl IntoView {
                 {doc_types.into_iter().enumerate().map(|(i, (dtype, label))| {
                     let dtype = dtype.to_string();
                     let label = label.to_string();
-                    let dtype_clone = dtype.clone();
+                    let dtype_for_status = dtype.clone();
+                    let dtype_for_buttons = dtype.clone();
                     let is_last = i == 6;
                     let border_class = if is_last { "" } else { "border-b border-stone-200/60" };
+                    let input_id = format!("file-input-{}", dtype);
+                    let input_id_for_btn = input_id.clone();
+                    let input_id_for_handler = input_id.clone();
                     view! {
                         <div class={format!("flex items-center justify-between px-5 py-4 hover:bg-stone-50/50 transition-colors {}", border_class)}>
                             <div class="min-w-0 flex-1">
                                 <p class="font-medium text-stone-800">{label}</p>
                                 {move || {
                                     let docs = documents.get();
-                                    let found = docs.iter().find(|d| d.doc_type == dtype);
+                                    let found = docs.iter().find(|d| d.doc_type == dtype_for_status);
                                     match found {
                                         Some(doc) => {
                                             let name = doc.name.clone();
@@ -82,18 +130,31 @@ pub fn AdminDocuments() -> impl IntoView {
                             <div class="flex items-center gap-2 ml-4 shrink-0">
                                 {move || {
                                     let docs = documents.get();
-                                    let found = docs.iter().find(|d| d.doc_type == dtype_clone);
+                                    let found = docs.iter().find(|d| d.doc_type == dtype_for_buttons).cloned();
                                     match found {
                                         Some(doc) => {
-                                            let path = doc.file_path.clone();
+                                            let view_path = format!("/api/documents/file/{}", doc.id);
+                                            let delete_id = doc.id.clone();
                                             view! {
                                                 <a
-                                                    href={path}
+                                                    href={view_path}
                                                     target="_blank"
                                                     class="btn-secondary text-sm"
                                                 >
                                                     "View"
                                                 </a>
+                                                <button
+                                                    class="btn-secondary text-sm !text-red-600 !border-red-200 hover:!bg-red-50"
+                                                    on:click=move |_| {
+                                                        #[cfg(feature = "hydrate")]
+                                                        {
+                                                            let id = delete_id.clone();
+                                                            delete_doc(id, set_documents);
+                                                        }
+                                                    }
+                                                >
+                                                    "Delete"
+                                                </button>
                                             }.into_any()
                                         }
                                         None => view! {
@@ -101,8 +162,43 @@ pub fn AdminDocuments() -> impl IntoView {
                                         }.into_any()
                                     }
                                 }}
-                                // TODO: file upload button
-                                <button class="btn-secondary text-sm">
+                                // Hidden file input
+                                <input
+                                    type="file"
+                                    id={input_id.clone()}
+                                    style="display:none"
+                                    on:change=move |ev| {
+                                        #[cfg(feature = "hydrate")]
+                                        {
+                                            use wasm_bindgen::JsCast;
+                                            let target = ev.target().unwrap();
+                                            let input: web_sys::HtmlInputElement = target.unchecked_into();
+                                            if let Some(files) = input.files() {
+                                                if let Some(file) = files.get(0) {
+                                                    let dtype = input.id().replace("file-input-", "");
+                                                    upload_file(dtype, file, set_documents);
+                                                }
+                                            }
+                                            // Reset the input so the same file can be re-selected
+                                            input.set_value("");
+                                        }
+                                    }
+                                />
+                                <button
+                                    class="btn-secondary text-sm"
+                                    on:click=move |_| {
+                                        #[cfg(feature = "hydrate")]
+                                        {
+                                            use wasm_bindgen::JsCast;
+                                            let window = web_sys::window().unwrap();
+                                            let document = window.document().unwrap();
+                                            if let Some(el) = document.get_element_by_id(&input_id_for_btn) {
+                                                let input: web_sys::HtmlInputElement = el.unchecked_into();
+                                                input.click();
+                                            }
+                                        }
+                                    }
+                                >
                                     "Upload"
                                 </button>
                             </div>

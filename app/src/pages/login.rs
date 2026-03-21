@@ -128,6 +128,12 @@ pub fn LoginPage() -> impl IntoView {
                     </button>
                 </form>
 
+                <p class="text-center text-sm text-stone-400 mt-4">
+                    <a href="/forgot-password" class="text-stone-500 hover:text-stone-700 underline underline-offset-2 decoration-stone-300 transition-colors">
+                        "Forgot password?"
+                    </a>
+                </p>
+
                 <p class="text-center text-xs text-stone-400 mt-8">
                     "Need access? Contact "
                     <a href="mailto:masonwheeler@fieldflow.us" class="text-stone-500 hover:text-stone-700 underline underline-offset-2 decoration-stone-300 transition-colors">
