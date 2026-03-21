@@ -412,6 +412,32 @@ pub struct OverviewReport {
 }
 
 // ---------------------------------------------------------------------------
+// Lease Status
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeaseStatus {
+    Pending,
+    Sent,
+    SignedByTenant,
+    Executed,
+    Expired,
+}
+
+impl std::fmt::Display for LeaseStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LeaseStatus::Pending => write!(f, "pending"),
+            LeaseStatus::Sent => write!(f, "sent"),
+            LeaseStatus::SignedByTenant => write!(f, "signed_by_tenant"),
+            LeaseStatus::Executed => write!(f, "executed"),
+            LeaseStatus::Expired => write!(f, "expired"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Lease Agreement
 // ---------------------------------------------------------------------------
 
@@ -420,7 +446,7 @@ pub struct LeaseAgreement {
     pub id: String,
     pub tenant_id: String,
     pub document_id: Option<String>,
-    pub status: String, // pending, sent, signed_by_tenant, executed, expired
+    pub status: LeaseStatus,
     pub rent_amount: f64,
     pub lease_start: Option<String>,
     pub lease_end: Option<String>,

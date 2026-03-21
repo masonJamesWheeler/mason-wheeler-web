@@ -2460,7 +2460,7 @@ async fn tenant_get_lease(
                     id: row.get(0)?,
                     tenant_id: row.get(1)?,
                     document_id: row.get(2)?,
-                    status: row.get(3)?,
+                    status: parse_enum(&row.get::<_, String>(3)?, LeaseStatus::Pending),
                     rent_amount: row.get(4)?,
                     lease_start: row.get(5)?,
                     lease_end: row.get(6)?,
@@ -2531,7 +2531,7 @@ async fn tenant_sign_lease(
     tracing::info!("Tenant {} signed lease {} as '{}'", user.id, body.lease_id, name);
 
     Ok(Json(serde_json::json!({
-        "status": "signed_by_tenant",
+        "status": LeaseStatus::SignedByTenant,
         "signed_at": now,
         "signed_name": name,
     })))
@@ -2558,7 +2558,7 @@ async fn admin_list_leases(
                 id: row.get(0)?,
                 tenant_id: row.get(1)?,
                 document_id: row.get(2)?,
-                status: row.get(3)?,
+                status: parse_enum(&row.get::<_, String>(3)?, LeaseStatus::Pending),
                 rent_amount: row.get(4)?,
                 lease_start: row.get(5)?,
                 lease_end: row.get(6)?,
@@ -2597,7 +2597,7 @@ async fn admin_create_lease(
         id,
         tenant_id: body.tenant_id,
         document_id: None,
-        status: "sent".to_string(),
+        status: LeaseStatus::Sent,
         rent_amount: body.rent_amount,
         lease_start: Some(body.lease_start),
         lease_end: Some(body.lease_end),
@@ -2627,7 +2627,7 @@ async fn admin_sign_lease(
         )
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    if status != "signed_by_tenant" {
+    if status != LeaseStatus::SignedByTenant.to_string() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -2652,7 +2652,7 @@ async fn admin_sign_lease(
     tracing::info!("Landlord countersigned lease {}", lease_id);
 
     Ok(Json(serde_json::json!({
-        "status": "executed",
+        "status": LeaseStatus::Executed,
         "signed_at": now,
     })))
 }
@@ -2676,7 +2676,7 @@ async fn pdf_lease(
                     id: row.get(0)?,
                     tenant_id: row.get(1)?,
                     document_id: row.get(2)?,
-                    status: row.get(3)?,
+                    status: parse_enum(&row.get::<_, String>(3)?, LeaseStatus::Pending),
                     rent_amount: row.get(4)?,
                     lease_start: row.get(5)?,
                     lease_end: row.get(6)?,

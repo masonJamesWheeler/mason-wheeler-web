@@ -155,7 +155,7 @@ pub fn SignLeasePage() -> impl IntoView {
                                                 <div>
                                                     <p class="font-medium text-emerald-900">"You have signed this lease"</p>
                                                     <p class="text-sm text-emerald-700">
-                                                        {if status == "executed" {
+                                                        {if status == mason_wheeler_shared::LeaseStatus::Executed {
                                                             "Lease is fully executed. Both parties have signed."
                                                         } else {
                                                             "Awaiting landlord countersignature."
