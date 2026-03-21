@@ -43,21 +43,28 @@ pub fn HomePage() -> impl IntoView {
             <div class="hidden lg:block lg:w-2/3 lg:relative">
                 <div class="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-1">
                     <div class="col-span-2 relative overflow-hidden">
-                        <img src="/photos/LCS00733.jpg" alt="Living room with fireplace" class="absolute inset-0 w-full h-full object-cover" />
+                        <img src="/photos/living-room-fireplace-wide.jpg" alt="Living room with fireplace" class="absolute inset-0 w-full h-full object-cover" />
                     </div>
                     <div class="relative overflow-hidden">
-                        <img src="/photos/LCS00703.jpg" alt="Updated kitchen" class="absolute inset-0 w-full h-full object-cover" />
+                        <img src="/photos/kitchen-dining-nook-wide.jpg" alt="Updated kitchen" class="absolute inset-0 w-full h-full object-cover" />
                     </div>
                     <div class="relative overflow-hidden">
-                        <img src="/photos/LCS00694.jpg" alt="Primary bedroom" class="absolute inset-0 w-full h-full object-cover" />
+                        <img src="/photos/bedroom-1-primary-dark-furniture.jpg" alt="Primary bedroom" class="absolute inset-0 w-full h-full object-cover" />
                     </div>
                 </div>
+                // Gallery link overlay
+                <a href="/gallery" class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-stone-800 text-sm font-medium px-4 py-2 rounded-xl hover:bg-white transition-colors shadow-lg">
+                    "View all 23 photos"
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                    </svg>
+                </a>
             </div>
 
             // ── Mobile/Tablet: stacked layout ────────────────────────
             <div class="lg:hidden">
                 <div class="relative w-full h-[55vh] min-h-[400px]">
-                    <img src="/photos/LCS00733.jpg" alt="Living room at 8404 12th Ave S" class="absolute inset-0 w-full h-full object-cover" />
+                    <img src="/photos/living-room-fireplace-wide.jpg" alt="Living room at 8404 12th Ave S" class="absolute inset-0 w-full h-full object-cover" />
                     <div class="absolute inset-0 bg-gradient-to-t from-stone-950/70 via-stone-900/20 to-stone-900/5" />
                     <div class="absolute bottom-0 left-0 right-0 p-8 sm:p-12">
                         <div class="max-w-5xl mx-auto">

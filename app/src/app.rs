@@ -76,6 +76,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/login") view=|| view! { <PublicLayout><pages::login::LoginPage /></PublicLayout> } />
                 <Route path=path!("/forgot-password") view=|| view! { <PublicLayout><pages::forgot_password::ForgotPasswordPage /></PublicLayout> } />
                 <Route path=path!("/reset-password") view=|| view! { <PublicLayout><pages::reset_password::ResetPasswordPage /></PublicLayout> } />
+                <Route path=path!("/gallery") view=|| view! { <PublicLayout><pages::gallery::GalleryPage /></PublicLayout> } />
 
                 // Tenant routes — auth required
                 <Route path=path!("/tenant") view=|| view! { <ProtectedLayout><pages::tenant::dashboard::TenantDashboard /></ProtectedLayout> } />
