@@ -68,11 +68,7 @@ pub fn LoginPage() -> impl IntoView {
             <div class="w-full max-w-[380px]">
                 // Logo
                 <div class="text-center mb-10">
-                    <div class="w-12 h-12 rounded-xl bg-stone-900 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-stone-900/10">
-                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                        </svg>
-                    </div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.1em] text-stone-400 mb-3">"8404 12th Ave S"</p>
                     <h1 class="text-xl font-semibold text-stone-900 tracking-tight">"Welcome back"</h1>
                     <p class="text-stone-400 text-sm mt-1">"Sign in to your resident portal"</p>
                 </div>

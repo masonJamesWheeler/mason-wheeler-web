@@ -28,13 +28,8 @@ pub fn Header() -> impl IntoView {
     view! {
         <header class="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-stone-200/60">
             <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-                <A href="/" attr:class="flex items-center gap-3 group">
-                    <div class="w-8 h-8 rounded-lg bg-stone-800 flex items-center justify-center">
-                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                        </svg>
-                    </div>
-                    <span class="hidden sm:block text-sm font-semibold text-stone-900 leading-none">"8404 12th Ave S"</span>
+                <A href="/" attr:class="text-[15px] font-semibold text-stone-900 tracking-tight hover:text-stone-600 transition-colors">
+                    "8404 12th Ave S"
                 </A>
 
                 // Desktop nav

@@ -44,6 +44,7 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 gloo-net = { version = "0.6", optional = true }
 gloo-timers = { version = "0.3", optional = true, features = ["futures"] }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 
 [features]
 hydrate = [
@@ -53,6 +54,7 @@ hydrate = [
     "web-sys",
     "gloo-net",
     "gloo-timers",
+    "wasm-bindgen-futures",
 ]
 ssr = [
     "axum",

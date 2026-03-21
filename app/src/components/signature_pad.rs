@@ -11,7 +11,6 @@ pub fn SignaturePad(
     let canvas_ref = NodeRef::<leptos::html::Canvas>::new();
     let (is_empty, set_is_empty) = signal(true);
 
-    // Drawing state managed via cfg(feature = "hydrate")
     #[cfg(feature = "hydrate")]
     {
         use wasm_bindgen::prelude::*;
@@ -31,12 +30,129 @@ pub fn SignaturePad(
                 .and_then(|obj| obj.dyn_into::<CanvasRenderingContext2d>().ok())
         };
 
-        let clear_canvas = move || {
+        // Initialize placeholder text after mount
+        Effect::new(move || {
             if let Some(ctx) = get_ctx() {
                 let canvas = canvas_ref.get().unwrap();
                 let canvas: &HtmlCanvasElement = canvas.as_ref();
                 ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
-                // Draw placeholder text
+                ctx.set_font("14px sans-serif");
+                ctx.set_fill_style_str("#9ca3af");
+                ctx.set_text_align("center");
+                ctx.set_text_baseline("middle");
+                let _ = ctx.fill_text(
+                    "Sign here",
+                    canvas.width() as f64 / 2.0,
+                    canvas.height() as f64 / 2.0,
+                );
+            }
+        });
+
+        let d1 = drawing.clone();
+        let mouse_down = move |ev: MouseEvent| {
+            d1.set(true);
+            if let Some(ctx) = get_ctx() {
+                if is_empty.get_untracked() {
+                    let canvas = canvas_ref.get().unwrap();
+                    let canvas: &HtmlCanvasElement = canvas.as_ref();
+                    ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
+                    set_is_empty.set(false);
+                }
+                let canvas = canvas_ref.get().unwrap();
+                let canvas: &HtmlCanvasElement = canvas.as_ref();
+                let rect = canvas.get_bounding_client_rect();
+                let x = ev.client_x() as f64 - rect.left();
+                let y = ev.client_y() as f64 - rect.top();
+                ctx.begin_path();
+                ctx.move_to(x, y);
+                ctx.set_stroke_style_str("#1c1917");
+                ctx.set_line_width(2.0);
+                ctx.set_line_cap("round");
+                ctx.set_line_join("round");
+            }
+        };
+
+        let d2 = drawing.clone();
+        let mouse_move = move |ev: MouseEvent| {
+            if d2.get() {
+                if let Some(ctx) = get_ctx() {
+                    let canvas = canvas_ref.get().unwrap();
+                    let canvas: &HtmlCanvasElement = canvas.as_ref();
+                    let rect = canvas.get_bounding_client_rect();
+                    let x = ev.client_x() as f64 - rect.left();
+                    let y = ev.client_y() as f64 - rect.top();
+                    ctx.line_to(x, y);
+                    ctx.stroke();
+                }
+            }
+        };
+
+        let d3 = drawing.clone();
+        let mouse_up = move |_ev: MouseEvent| {
+            d3.set(false);
+        };
+
+        let d4 = drawing.clone();
+        let mouse_leave = move |_ev: MouseEvent| {
+            d4.set(false);
+        };
+
+        let d5 = drawing.clone();
+        let touch_start = move |ev: TouchEvent| {
+            ev.prevent_default();
+            d5.set(true);
+            if let Some(touch) = ev.touches().get(0) {
+                if let Some(ctx) = get_ctx() {
+                    if is_empty.get_untracked() {
+                        let canvas = canvas_ref.get().unwrap();
+                        let canvas: &HtmlCanvasElement = canvas.as_ref();
+                        ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
+                        set_is_empty.set(false);
+                    }
+                    let canvas = canvas_ref.get().unwrap();
+                    let canvas: &HtmlCanvasElement = canvas.as_ref();
+                    let rect = canvas.get_bounding_client_rect();
+                    let x = touch.client_x() as f64 - rect.left();
+                    let y = touch.client_y() as f64 - rect.top();
+                    ctx.begin_path();
+                    ctx.move_to(x, y);
+                    ctx.set_stroke_style_str("#1c1917");
+                    ctx.set_line_width(2.0);
+                    ctx.set_line_cap("round");
+                    ctx.set_line_join("round");
+                }
+            }
+        };
+
+        let d6 = drawing.clone();
+        let touch_move = move |ev: TouchEvent| {
+            ev.prevent_default();
+            if d6.get() {
+                if let Some(touch) = ev.touches().get(0) {
+                    if let Some(ctx) = get_ctx() {
+                        let canvas = canvas_ref.get().unwrap();
+                        let canvas: &HtmlCanvasElement = canvas.as_ref();
+                        let rect = canvas.get_bounding_client_rect();
+                        let x = touch.client_x() as f64 - rect.left();
+                        let y = touch.client_y() as f64 - rect.top();
+                        ctx.line_to(x, y);
+                        ctx.stroke();
+                    }
+                }
+            }
+        };
+
+        let d7 = drawing.clone();
+        let touch_end = move |ev: TouchEvent| {
+            ev.prevent_default();
+            d7.set(false);
+        };
+
+        let on_clear = move |_| {
+            if let Some(ctx) = get_ctx() {
+                let canvas = canvas_ref.get().unwrap();
+                let canvas: &HtmlCanvasElement = canvas.as_ref();
+                ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
                 ctx.set_font("14px sans-serif");
                 ctx.set_fill_style_str("#9ca3af");
                 ctx.set_text_align("center");
@@ -48,99 +164,6 @@ pub fn SignaturePad(
                 );
                 set_is_empty.set(true);
             }
-        };
-
-        // Initialize placeholder text after mount
-        Effect::new(move || {
-            canvas_ref.get();
-            clear_canvas();
-        });
-
-        let on_pointer_down = move |x: f64, y: f64| {
-            drawing.set(true);
-            if let Some(ctx) = get_ctx() {
-                // Clear placeholder on first stroke
-                if is_empty.get_untracked() {
-                    let canvas = canvas_ref.get().unwrap();
-                    let canvas: &HtmlCanvasElement = canvas.as_ref();
-                    ctx.clear_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
-                    set_is_empty.set(false);
-                }
-                ctx.begin_path();
-                ctx.move_to(x, y);
-                ctx.set_stroke_style_str("#1c1917");
-                ctx.set_line_width(2.0);
-                ctx.set_line_cap("round");
-                ctx.set_line_join("round");
-            }
-        };
-
-        let on_pointer_move = move |x: f64, y: f64| {
-            if drawing.get() {
-                if let Some(ctx) = get_ctx() {
-                    ctx.line_to(x, y);
-                    ctx.stroke();
-                }
-            }
-        };
-
-        let on_pointer_up = move || {
-            drawing.set(false);
-        };
-
-        let mouse_down = move |ev: MouseEvent| {
-            let canvas = canvas_ref.get().unwrap();
-            let canvas: &HtmlCanvasElement = canvas.as_ref();
-            let rect = canvas.get_bounding_client_rect();
-            let x = ev.client_x() as f64 - rect.left();
-            let y = ev.client_y() as f64 - rect.top();
-            on_pointer_down(x, y);
-        };
-
-        let mouse_move = move |ev: MouseEvent| {
-            let canvas = canvas_ref.get().unwrap();
-            let canvas: &HtmlCanvasElement = canvas.as_ref();
-            let rect = canvas.get_bounding_client_rect();
-            let x = ev.client_x() as f64 - rect.left();
-            let y = ev.client_y() as f64 - rect.top();
-            on_pointer_move(x, y);
-        };
-
-        let mouse_up = move |_ev: MouseEvent| {
-            on_pointer_up();
-        };
-
-        let touch_start = move |ev: TouchEvent| {
-            ev.prevent_default();
-            if let Some(touch) = ev.touches().get(0) {
-                let canvas = canvas_ref.get().unwrap();
-                let canvas: &HtmlCanvasElement = canvas.as_ref();
-                let rect = canvas.get_bounding_client_rect();
-                let x = touch.client_x() as f64 - rect.left();
-                let y = touch.client_y() as f64 - rect.top();
-                on_pointer_down(x, y);
-            }
-        };
-
-        let touch_move = move |ev: TouchEvent| {
-            ev.prevent_default();
-            if let Some(touch) = ev.touches().get(0) {
-                let canvas = canvas_ref.get().unwrap();
-                let canvas: &HtmlCanvasElement = canvas.as_ref();
-                let rect = canvas.get_bounding_client_rect();
-                let x = touch.client_x() as f64 - rect.left();
-                let y = touch.client_y() as f64 - rect.top();
-                on_pointer_move(x, y);
-            }
-        };
-
-        let touch_end = move |ev: TouchEvent| {
-            ev.prevent_default();
-            on_pointer_up();
-        };
-
-        let on_clear = move |_| {
-            clear_canvas();
         };
 
         let on_sign_click = move |_| {
@@ -165,7 +188,7 @@ pub fn SignaturePad(
                     on:mousedown=mouse_down
                     on:mousemove=mouse_move
                     on:mouseup=mouse_up
-                    on:mouseleave=mouse_up
+                    on:mouseleave=mouse_leave
                     on:touchstart=touch_start
                     on:touchmove=touch_move
                     on:touchend=touch_end

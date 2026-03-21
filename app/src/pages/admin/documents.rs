@@ -21,9 +21,9 @@ fn upload_file(dtype: String, file: web_sys::File, set_documents: WriteSignal<Ve
         let _ = form_data.append_with_str("doc_type", &dtype);
         let _ = form_data.append_with_str("name", &file.name());
 
-        let mut opts = web_sys::RequestInit::new();
-        opts.method("POST");
-        opts.body(Some(&form_data));
+        let opts = web_sys::RequestInit::new();
+        opts.set_method("POST");
+        opts.set_body(&form_data);
 
         let request = web_sys::Request::new_with_str_and_init("/api/documents/upload", &opts).unwrap();
 
