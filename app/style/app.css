@@ -2,6 +2,8 @@
 
 @import 'tailwindcss';
 
+@source "../src/**/*.rs";
+
 @theme {
   /* Stone palette — warm neutral grays */
   --color-stone-50: #fafaf9;
