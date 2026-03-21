@@ -6,33 +6,40 @@ pub fn Header() -> impl IntoView {
     let (mobile_open, set_mobile_open) = signal(false);
 
     view! {
-        <header class="bg-slate-900 text-white shadow-lg">
-            <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-                <A href="/" attr:class="text-xl font-bold tracking-tight hover:text-orange-400 transition-colors">
-                    "8404 12th Ave S"
+        <header class="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-stone-200/60">
+            <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+                <A href="/" attr:class="flex items-center gap-3 group">
+                    <div class="w-8 h-8 rounded-lg bg-stone-900 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                        </svg>
+                    </div>
+                    <div class="hidden sm:block">
+                        <p class="text-sm font-semibold text-stone-900 leading-none">"8404 12th Ave S"</p>
+                        <p class="text-[11px] text-stone-400 mt-0.5">"Property Management"</p>
+                    </div>
                 </A>
 
                 // Desktop nav
-                <nav class="hidden md:flex items-center gap-6">
-                    <A href="/" attr:class="hover:text-orange-400 transition-colors">"Property"</A>
-                    <A href="/login" attr:class="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                        "Sign In"
+                <nav class="hidden md:flex items-center gap-1">
+                    <A href="/login" attr:class="btn-primary text-sm px-4 py-2">
+                        "Sign in"
                     </A>
                 </nav>
 
                 // Mobile toggle
                 <button
-                    class="md:hidden text-white"
+                    class="md:hidden w-10 h-10 flex items-center justify-center rounded-xl hover:bg-stone-100 transition-colors"
                     on:click=move |_| set_mobile_open.update(|v| *v = !*v)
                 >
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-5 h-5 text-stone-600" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                         <Show
                             when=move || mobile_open.get()
                             fallback=|| view! {
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" />
                             }
                         >
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </Show>
                     </svg>
                 </button>
@@ -40,9 +47,8 @@ pub fn Header() -> impl IntoView {
 
             // Mobile nav
             <Show when=move || mobile_open.get()>
-                <nav class="md:hidden px-4 pb-4 space-y-2">
-                    <A href="/" attr:class="block py-2 hover:text-orange-400">"Property"</A>
-                    <A href="/login" attr:class="block py-2 text-orange-400">"Sign In"</A>
+                <nav class="md:hidden border-t border-stone-100 px-6 py-4 bg-white space-y-1">
+                    <A href="/login" attr:class="block py-2.5 px-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">"Sign in"</A>
                 </nav>
             </Show>
         </header>

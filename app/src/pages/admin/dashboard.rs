@@ -3,6 +3,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use mason_wheeler_shared::DashboardData;
 
+#[allow(unused)]
 #[component]
 pub fn AdminDashboard() -> impl IntoView {
     let (data, set_data) = signal::<Option<DashboardData>>(None);
@@ -19,33 +20,39 @@ pub fn AdminDashboard() -> impl IntoView {
     }
 
     view! {
-        <div class="max-w-4xl mx-auto px-4 py-8">
-            <h1 class="text-2xl font-bold text-slate-900 mb-6">"Admin Dashboard"</h1>
+        <div class="max-w-5xl mx-auto px-6 py-10">
+            <h1 class="text-3xl font-bold tracking-tight text-stone-900 mb-1">"Admin Dashboard"</h1>
+            <p class="text-stone-500 mb-8">"Property overview and quick actions"</p>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                <div class="bg-white border border-slate-200 rounded-xl p-6">
-                    <p class="text-sm text-slate-500">"Rent Status"</p>
+            // Stats row
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10">
+                <div class="card">
+                    <p class="stat-label">"Rent Status"</p>
                     {move || match data.get() {
                         Some(d) if d.amount_due > 0.0 => view! {
-                            <p class="text-2xl font-bold text-yellow-600">{format!("${:.2} due", d.amount_due)}</p>
+                            <p class="text-2xl font-bold text-amber-500 mt-1">{format!("${:.2} due", d.amount_due)}</p>
+                            <p class="text-xs text-stone-400 mt-1">"Outstanding balance"</p>
                         }.into_any(),
                         Some(_) => view! {
-                            <p class="text-2xl font-bold text-green-600">"Paid"</p>
+                            <p class="text-2xl font-bold text-emerald-600 mt-1">"Paid"</p>
+                            <p class="text-xs text-stone-400 mt-1">"Current period settled"</p>
                         }.into_any(),
                         None => view! {
-                            <p class="text-xl text-slate-400">"Loading..."</p>
+                            <p class="text-2xl font-bold text-stone-300 mt-1">"..."</p>
+                            <p class="text-xs text-stone-400 mt-1">"Loading"</p>
                         }.into_any(),
                     }}
                 </div>
-                <div class="bg-white border border-slate-200 rounded-xl p-6">
-                    <p class="text-sm text-slate-500">"Active Maintenance"</p>
-                    <p class="text-2xl font-bold text-slate-900">
+                <div class="card">
+                    <p class="stat-label">"Active Maintenance"</p>
+                    <p class="text-2xl font-bold text-stone-900 mt-1">
                         {move || data.get().map(|d| d.active_maintenance.len()).unwrap_or(0)}
                     </p>
+                    <p class="text-xs text-stone-400 mt-1">"Open requests"</p>
                 </div>
-                <div class="bg-white border border-slate-200 rounded-xl p-6">
-                    <p class="text-sm text-slate-500">"Outstanding Utilities"</p>
-                    <p class="text-2xl font-bold text-slate-900">
+                <div class="card">
+                    <p class="stat-label">"Outstanding Utilities"</p>
+                    <p class="text-2xl font-bold text-stone-900 mt-1">
                         {move || {
                             data.get()
                                 .map(|d| {
@@ -55,42 +62,56 @@ pub fn AdminDashboard() -> impl IntoView {
                                 .unwrap_or_else(|| "...".to_string())
                         }}
                     </p>
+                    <p class="text-xs text-stone-400 mt-1">"Pending charges"</p>
                 </div>
             </div>
 
-            <h2 class="text-lg font-semibold text-slate-900 mb-4">"Quick Actions"</h2>
+            // Quick Actions
+            <h2 class="section-title">"Quick Actions"</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <A href="/admin/payments"
-                    attr:class="flex items-center gap-4 bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-6 transition-colors"
+                    attr:class="card-hover group flex items-center justify-between"
                 >
                     <div>
-                        <p class="font-semibold text-lg text-slate-900">"Manage Payments"</p>
-                        <p class="text-slate-500 text-sm">"View history, add utility charges"</p>
+                        <p class="font-semibold text-lg text-stone-900">"Manage Payments"</p>
+                        <p class="text-stone-500 text-sm mt-0.5">"View history, add utility charges"</p>
                     </div>
+                    <svg class="w-5 h-5 text-stone-400 group-hover:text-amber-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
                 </A>
                 <A href="/admin/maintenance"
-                    attr:class="flex items-center gap-4 bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-6 transition-colors"
+                    attr:class="card-hover group flex items-center justify-between"
                 >
                     <div>
-                        <p class="font-semibold text-lg text-slate-900">"Maintenance Requests"</p>
-                        <p class="text-slate-500 text-sm">"View and respond to tenant requests"</p>
+                        <p class="font-semibold text-lg text-stone-900">"Maintenance Requests"</p>
+                        <p class="text-stone-500 text-sm mt-0.5">"View and respond to tenant requests"</p>
                     </div>
+                    <svg class="w-5 h-5 text-stone-400 group-hover:text-amber-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
                 </A>
                 <A href="/admin/documents"
-                    attr:class="flex items-center gap-4 bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-6 transition-colors"
+                    attr:class="card-hover group flex items-center justify-between"
                 >
                     <div>
-                        <p class="font-semibold text-lg text-slate-900">"Documents"</p>
-                        <p class="text-slate-500 text-sm">"Upload lease, disclosures, receipts"</p>
+                        <p class="font-semibold text-lg text-stone-900">"Documents"</p>
+                        <p class="text-stone-500 text-sm mt-0.5">"Upload lease, disclosures, receipts"</p>
                     </div>
+                    <svg class="w-5 h-5 text-stone-400 group-hover:text-amber-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
                 </A>
                 <A href="/admin/payments"
-                    attr:class="flex items-center gap-4 bg-orange-600 hover:bg-orange-700 text-white rounded-xl p-6 transition-colors"
+                    attr:class="card-hover group flex items-center justify-between !bg-amber-500 hover:!bg-amber-600 !border-amber-500"
                 >
                     <div>
-                        <p class="font-semibold text-lg">"Add Utility Charge"</p>
-                        <p class="text-orange-100 text-sm">"Pass through utility costs to tenant"</p>
+                        <p class="font-semibold text-lg text-white">"Add Utility Charge"</p>
+                        <p class="text-amber-100 text-sm mt-0.5">"Pass through utility costs to tenant"</p>
                     </div>
+                    <svg class="w-5 h-5 text-amber-200 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
                 </A>
             </div>
         </div>

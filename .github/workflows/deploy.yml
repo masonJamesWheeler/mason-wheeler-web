@@ -155,7 +155,7 @@ jobs:
               echo "SSL cert exists for properties.mason-wheeler.com"
             else
               echo "SSL cert not yet issued — attempting certbot"
-              sudo certbot --nginx -d properties.mason-wheeler.com --non-interactive --agree-tos --email masewheeler@outlook.com 2>&1 || echo "Certbot skipped (DNS may not have propagated)"
+              sudo certbot --nginx -d properties.mason-wheeler.com --non-interactive --agree-tos --email masonwheeler@fieldflow.us 2>&1 || echo "Certbot skipped (DNS may not have propagated)"
             fi
 
             echo "Deploy complete at $(date)"

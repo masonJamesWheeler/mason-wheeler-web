@@ -91,7 +91,7 @@ sudo systemctl enable nginx
 # Obtain SSL certificate
 echo "Obtaining SSL certificate..."
 sudo certbot --nginx -d "$DOMAIN" \
-    --non-interactive --agree-tos --email "masewheeler@outlook.com"
+    --non-interactive --agree-tos --email "masonwheeler@fieldflow.us"
 
 # Reload Nginx with SSL
 sudo nginx -t

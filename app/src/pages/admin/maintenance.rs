@@ -2,6 +2,7 @@
 use leptos::prelude::*;
 use mason_wheeler_shared::MaintenanceRequest;
 
+#[allow(unused)]
 #[component]
 pub fn AdminMaintenance() -> impl IntoView {
     let (requests, set_requests) = signal::<Vec<MaintenanceRequest>>(vec![]);
@@ -45,17 +46,28 @@ pub fn AdminMaintenance() -> impl IntoView {
     };
 
     view! {
-        <div class="max-w-4xl mx-auto px-4 py-8">
-            <h1 class="text-2xl font-bold text-slate-900 mb-6">"Maintenance Requests"</h1>
+        <div class="max-w-5xl mx-auto px-6 py-10">
+            <h1 class="text-3xl font-bold tracking-tight text-stone-900 mb-1">"Maintenance Requests"</h1>
+            <p class="text-stone-500 mb-8">"Review and manage tenant maintenance requests"</p>
 
             <Show
                 when=move || !loading.get()
-                fallback=|| view! { <p class="text-slate-500">"Loading..."</p> }
+                fallback=|| view! {
+                    <div class="card text-center py-12">
+                        <p class="text-stone-400 text-sm">"Loading requests..."</p>
+                    </div>
+                }
             >
                 <Show
                     when=move || !requests.get().is_empty()
                     fallback=|| view! {
-                        <p class="text-slate-500 text-center py-12">"No maintenance requests."</p>
+                        <div class="card text-center py-16">
+                            <svg class="w-12 h-12 text-stone-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p class="text-stone-500 font-medium">"No maintenance requests"</p>
+                            <p class="text-stone-400 text-sm mt-1">"All caught up!"</p>
+                        </div>
                     }
                 >
                     <div class="space-y-4">
@@ -69,34 +81,36 @@ pub fn AdminMaintenance() -> impl IntoView {
                             let id_progress = id.clone();
                             let id_complete = id.clone();
 
+                            let badge_class = match status.as_str() {
+                                "submitted" => "badge-warning",
+                                "in_progress" => "badge-info",
+                                "completed" => "badge-success",
+                                _ => "badge-neutral",
+                            };
+
                             view! {
-                                <div class="bg-white border border-slate-200 rounded-xl p-6">
-                                    <div class="flex items-start justify-between mb-3">
-                                        <div>
-                                            <h3 class="font-semibold text-slate-900">{title}</h3>
-                                            <p class="text-sm text-slate-500 mt-1">{desc}</p>
-                                            <p class="text-xs text-slate-400 mt-2">{format!("Submitted {}", date)}</p>
+                                <div class="card">
+                                    <div class="flex items-start justify-between mb-4">
+                                        <div class="min-w-0 flex-1">
+                                            <h3 class="font-semibold text-stone-900 text-lg">{title}</h3>
+                                            <p class="text-sm text-stone-500 mt-1.5 leading-relaxed">{desc}</p>
+                                            <p class="text-xs text-stone-400 mt-2.5">
+                                                {format!("Submitted {}", date)}
+                                            </p>
                                         </div>
-                                        <span class={format!("text-xs font-medium px-2 py-1 rounded-full capitalize {}",
-                                            match status.as_str() {
-                                                "submitted" => "text-yellow-700 bg-yellow-50",
-                                                "in_progress" => "text-blue-700 bg-blue-50",
-                                                "completed" => "text-green-700 bg-green-50",
-                                                _ => "text-slate-700 bg-slate-50",
-                                            }
-                                        )}>
+                                        <span class={format!("capitalize ml-4 shrink-0 {}", badge_class)}>
                                             {status.replace('_', " ")}
                                         </span>
                                     </div>
-                                    <div class="flex gap-2">
+                                    <div class="flex gap-2 pt-3 border-t border-stone-200/60">
                                         <button
-                                            class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg transition-colors"
+                                            class="btn-secondary text-sm"
                                             on:click=move |_| update_status(id_progress.clone(), "in_progress".to_string())
                                         >
                                             "Mark In Progress"
                                         </button>
                                         <button
-                                            class="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg transition-colors"
+                                            class="btn-accent text-sm"
                                             on:click=move |_| update_status(id_complete.clone(), "completed".to_string())
                                         >
                                             "Mark Completed"

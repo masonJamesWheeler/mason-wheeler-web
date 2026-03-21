@@ -2,6 +2,7 @@
 use leptos::prelude::*;
 use mason_wheeler_shared::MaintenanceRequest;
 
+#[allow(unused)]
 #[component]
 pub fn TenantMaintenance() -> impl IntoView {
     let (requests, set_requests) = signal::<Vec<MaintenanceRequest>>(vec![]);
@@ -59,11 +60,15 @@ pub fn TenantMaintenance() -> impl IntoView {
     };
 
     view! {
-        <div class="max-w-4xl mx-auto px-4 py-8">
-            <div class="flex items-center justify-between mb-6">
-                <h1 class="text-2xl font-bold text-slate-900">"Maintenance"</h1>
+        <div class="max-w-5xl mx-auto px-6 py-10 font-['Inter',sans-serif]">
+            // Header
+            <div class="flex items-center justify-between mb-8">
+                <div>
+                    <h1 class="section-title text-3xl font-bold text-stone-900 tracking-tight">"Maintenance"</h1>
+                    <p class="text-stone-500 text-sm mt-1">"Track and manage your maintenance requests"</p>
+                </div>
                 <button
-                    class="bg-orange-600 hover:bg-orange-700 text-white font-medium px-4 py-2 rounded-lg transition-colors"
+                    class="btn-primary"
                     on:click=move |_| set_show_form.update(|v| *v = !*v)
                 >
                     {move || if show_form.get() { "Cancel" } else { "New Request" }}
@@ -72,38 +77,47 @@ pub fn TenantMaintenance() -> impl IntoView {
 
             // New request form
             <Show when=move || show_form.get()>
-                <form on:submit=handle_submit class="bg-white border border-slate-200 rounded-xl p-6 mb-6">
-                    <h2 class="font-semibold text-slate-900 mb-4">"Submit Maintenance Request"</h2>
-                    <div class="space-y-4">
+                <form on:submit=handle_submit class="card mb-8">
+                    <h2 class="text-lg font-semibold text-stone-900 mb-6">"Submit Maintenance Request"</h2>
+                    <div class="space-y-5">
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1">"Title"</label>
+                            <label class="stat-label block text-sm font-medium text-stone-600 mb-1.5">"Title"</label>
                             <input
                                 type="text"
                                 required=true
-                                class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                class="input"
                                 placeholder="e.g., Leaky faucet in kitchen"
                                 on:input=move |ev| set_title.set(event_target_value(&ev))
                                 prop:value=move || title.get()
                             />
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1">"Description"</label>
+                            <label class="stat-label block text-sm font-medium text-stone-600 mb-1.5">"Description"</label>
                             <textarea
                                 required=true
                                 rows="4"
-                                class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                class="input"
                                 placeholder="Describe the issue in detail..."
                                 on:input=move |ev| set_description.set(event_target_value(&ev))
                                 prop:value=move || description.get()
                             />
                         </div>
-                        <button
-                            type="submit"
-                            class="bg-orange-600 hover:bg-orange-700 text-white font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
-                            disabled=move || submitting.get()
-                        >
-                            {move || if submitting.get() { "Submitting..." } else { "Submit Request" }}
-                        </button>
+                        <div class="flex items-center gap-3 pt-2">
+                            <button
+                                type="submit"
+                                class="btn-accent"
+                                disabled=move || submitting.get()
+                            >
+                                {move || if submitting.get() { "Submitting..." } else { "Submit Request" }}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn-secondary"
+                                on:click=move |_| set_show_form.set(false)
+                            >
+                                "Cancel"
+                            </button>
+                        </div>
                     </div>
                 </form>
             </Show>
@@ -111,40 +125,66 @@ pub fn TenantMaintenance() -> impl IntoView {
             // Requests list
             <Show
                 when=move || !loading.get()
-                fallback=|| view! { <p class="text-slate-500">"Loading..."</p> }
+                fallback=|| view! {
+                    <div class="flex items-center justify-center py-16">
+                        <div class="flex items-center gap-3 text-stone-400">
+                            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                            </svg>
+                            <span class="text-sm font-medium">"Loading requests..."</span>
+                        </div>
+                    </div>
+                }
             >
                 <Show
                     when=move || !requests.get().is_empty()
                     fallback=|| view! {
-                        <div class="text-center py-12 text-slate-500">
-                            <p class="text-lg">"No maintenance requests yet."</p>
-                            <p class="text-sm mt-1">"Click 'New Request' if you need something fixed."</p>
+                        <div class="text-center py-20">
+                            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-stone-100 mb-5">
+                                <svg class="w-8 h-8 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17l-5.384-3.077A1.5 1.5 0 015 10.768V5.25A2.25 2.25 0 017.25 3h9.5A2.25 2.25 0 0119 5.25v5.518a1.5 1.5 0 01-1.036 1.425l-5.384 3.077a1.5 1.5 0 01-1.16 0z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 15.75v3.75" />
+                                </svg>
+                            </div>
+                            <p class="text-lg font-medium text-stone-700">"No maintenance requests yet"</p>
+                            <p class="text-sm text-stone-400 mt-2 max-w-sm mx-auto">
+                                "Everything looking good? If something needs fixing, click "
+                                <span class="font-medium text-amber-600">"New Request"</span>
+                                " to let us know."
+                            </p>
                         </div>
                     }
                 >
-                    <div class="space-y-3">
+                    <div class="space-y-4">
                         {move || requests.get().iter().map(|req| {
                             let title = req.title.clone();
                             let desc = req.description.clone();
                             let status = req.status.clone();
                             let date = req.created_at.clone();
-                            let status_class = match status.as_str() {
-                                "submitted" => "text-yellow-700 bg-yellow-50 border-yellow-200",
-                                "in_progress" => "text-blue-700 bg-blue-50 border-blue-200",
-                                "completed" => "text-green-700 bg-green-50 border-green-200",
-                                _ => "text-slate-700 bg-slate-50 border-slate-200",
+                            let badge_class = match status.as_str() {
+                                "submitted" => "badge-warning",
+                                "in_progress" => "badge-info",
+                                "completed" => "badge-success",
+                                _ => "badge-info",
                             };
+                            let status_label = status.replace('_', " ");
                             view! {
-                                <div class={format!("border rounded-xl p-4 {}", status_class)}>
-                                    <div class="flex items-start justify-between">
-                                        <div>
-                                            <p class="font-medium">{title}</p>
-                                            <p class="text-sm mt-1 opacity-80">{desc}</p>
-                                            <p class="text-xs mt-2 opacity-60">{format!("Submitted {}", date)}</p>
+                                <div class="card card-hover">
+                                    <div class="flex items-start justify-between gap-4">
+                                        <div class="min-w-0 flex-1">
+                                            <div class="flex items-center gap-3 mb-2">
+                                                <h3 class="font-semibold text-stone-900 truncate">{title}</h3>
+                                                <span class={badge_class}>{status_label}</span>
+                                            </div>
+                                            <p class="text-sm text-stone-500 leading-relaxed">{desc}</p>
+                                            <p class="text-xs text-stone-400 mt-3 flex items-center gap-1.5">
+                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                {format!("Submitted {}", date)}
+                                            </p>
                                         </div>
-                                        <span class="text-xs font-medium px-2 py-1 rounded-full capitalize bg-white/50">
-                                            {status.replace('_', " ")}
-                                        </span>
                                     </div>
                                 </div>
                             }
