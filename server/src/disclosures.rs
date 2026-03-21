@@ -7,7 +7,7 @@ use mason_wheeler_shared::*;
 use uuid::Uuid;
 
 use crate::db::get_db;
-use crate::routes::extract_user;
+use crate::routes::{require_auth, require_landlord};
 
 fn landlord_name() -> String {
     let db = get_db();
@@ -111,7 +111,7 @@ fn default_checklist_rooms() -> Vec<(&'static str, Vec<&'static str>)> {
 }
 
 async fn get_checklist(headers: HeaderMap) -> Result<Json<Option<MoveInChecklist>>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let checklist = db.query_row(
@@ -179,10 +179,7 @@ async fn create_checklist(
     headers: HeaderMap,
     Json(body): Json<CreateChecklistRequest>,
 ) -> Result<Json<MoveInChecklist>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let user = require_landlord(&headers)?;
 
     let checklist_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -262,7 +259,7 @@ async fn sign_checklist(
     headers: HeaderMap,
     Json(body): Json<SignRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     let db = get_db();
 
     let column = match body.role.as_str() {
@@ -284,7 +281,7 @@ async fn sign_checklist(
 // ---------------------------------------------------------------------------
 
 async fn get_lead_paint(headers: HeaderMap) -> Result<Json<Option<LeadPaintDisclosure>>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let result = db.query_row(
@@ -318,10 +315,7 @@ async fn create_lead_paint(
     headers: HeaderMap,
     Json(body): Json<LeadPaintDisclosure>,
 ) -> Result<Json<LeadPaintDisclosure>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let user = require_landlord(&headers)?;
 
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -341,7 +335,7 @@ async fn create_lead_paint(
 }
 
 async fn acknowledge_lead_paint(headers: HeaderMap) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     if user.role != "tenant" {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -361,7 +355,7 @@ async fn acknowledge_lead_paint(headers: HeaderMap) -> Result<Json<serde_json::V
 
 /// Returns WA DOH-approved mold disclosure content
 async fn get_mold_info(headers: HeaderMap) -> Result<Json<serde_json::Value>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
 
     Ok(Json(serde_json::json!({
         "title": "Mold Information for Tenants",
@@ -414,7 +408,7 @@ async fn get_mold_info(headers: HeaderMap) -> Result<Json<serde_json::Value>, St
 // ---------------------------------------------------------------------------
 
 async fn get_deposit_receipt(headers: HeaderMap) -> Result<Json<Option<DepositReceipt>>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let result = db.query_row(
@@ -443,10 +437,7 @@ async fn create_deposit_receipt(
     headers: HeaderMap,
     Json(body): Json<DepositReceipt>,
 ) -> Result<Json<DepositReceipt>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let user = require_landlord(&headers)?;
 
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -470,7 +461,7 @@ async fn create_deposit_receipt(
 // ---------------------------------------------------------------------------
 
 async fn get_fee_in_lieu_info(headers: HeaderMap) -> Result<Json<serde_json::Value>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
 
     Ok(Json(serde_json::json!({
         "title": "Fee in Lieu of Security Deposit Disclosure",
@@ -499,7 +490,7 @@ async fn get_fee_in_lieu_info(headers: HeaderMap) -> Result<Json<serde_json::Val
 // ---------------------------------------------------------------------------
 
 async fn get_landlord_contact(headers: HeaderMap) -> Result<Json<LandlordContactInfo>, StatusCode> {
-    let _user = extract_user(&headers)?;
+    let _user = require_auth(&headers)?;
     let db = get_db();
 
     let result = db.query_row(
@@ -522,10 +513,7 @@ async fn update_landlord_contact(
     headers: HeaderMap,
     Json(body): Json<LandlordContactInfo>,
 ) -> Result<Json<LandlordContactInfo>, StatusCode> {
-    let user = extract_user(&headers)?;
-    if user.role != "landlord" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    let user = require_landlord(&headers)?;
 
     let db = get_db();
     db.execute(

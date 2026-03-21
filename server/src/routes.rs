@@ -179,11 +179,11 @@ pub fn extract_user(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
     })
 }
 
-fn require_auth(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
+pub fn require_auth(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
     extract_user(headers)
 }
 
-fn require_landlord(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
+pub fn require_landlord(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
     let user = extract_user(headers)?;
     if user.role != "landlord" {
         return Err(StatusCode::FORBIDDEN);
