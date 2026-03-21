@@ -229,11 +229,15 @@ fn test_hash_and_verify_password() {
 
 #[test]
 fn test_generate_and_validate_token() {
-    let user_id = "user-42";
-    let email = "alice@example.com";
-    let role = "tenant";
+    // generate_token now creates a session row, so we need the DB initialized
+    // and the user to exist (foreign key constraint on sessions.user_id).
+    ensure_init_db();
 
-    let token = auth::generate_token(user_id, email, role, "Test User").expect("token generation should succeed");
+    let user_id = "landlord-1"; // seeded by ensure_init_db
+    let email = "admin@test.com";
+    let role = "landlord";
+
+    let token = auth::generate_token(user_id, email, role, "Test Admin").expect("token generation should succeed");
 
     let claims = auth::validate_token(&token).expect("token validation should succeed");
     assert_eq!(claims.sub, user_id);
@@ -246,13 +250,15 @@ fn test_generate_and_validate_token() {
 
 #[test]
 fn test_expired_token_rejected() {
+    ensure_init_db();
     let secret =
-        std::env::var("SESSION_SECRET").unwrap_or_else(|_| "default-secret-change-me".to_string());
+        std::env::var("SESSION_SECRET").expect("SESSION_SECRET should be set by ensure_init_db");
 
     let claims = auth::Claims {
         sub: "user-1".to_string(),
         email: "expired@example.com".to_string(),
         role: "tenant".to_string(),
+        name: "Expired User".to_string(),
         session_id: None,
         exp: 1_000_000, // far in the past (1970)
     };
@@ -284,11 +290,14 @@ fn ensure_init_db() {
         let db_path = tmp_dir.path().join("test.db");
         // SAFETY: We call this during test init before any threads are spawned,
         // and test parallelism is managed by the test harness.
+        // SAFETY: We call this during test init before any threads are spawned,
+        // and test parallelism is managed by the test harness.
         unsafe {
             std::env::set_var("DATABASE_PATH", db_path.to_str().unwrap());
             std::env::set_var("ADMIN_EMAIL", "admin@test.com");
             std::env::set_var("ADMIN_PASSWORD", "adminpass123");
             std::env::set_var("ADMIN_NAME", "Test Admin");
+            std::env::set_var("SESSION_SECRET", "test-secret-for-jwt-signing");
         }
 
         // init_db also creates data/documents and data/signatures directories

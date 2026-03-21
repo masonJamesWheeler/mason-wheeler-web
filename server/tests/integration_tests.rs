@@ -33,7 +33,7 @@ fn build_server() -> TestServer {
 }
 
 fn landlord_cookie() -> String {
-    let token = auth::generate_token("landlord-1", "test-landlord@test.com", "landlord").unwrap();
+    let token = auth::generate_token("landlord-1", "test-landlord@test.com", "landlord", "Test Landlord").unwrap();
     format!("token={}", token)
 }
 
@@ -44,7 +44,7 @@ fn create_test_tenant() -> String {
         "INSERT OR IGNORE INTO users (id, email, password_hash, role, name) VALUES (?1, ?2, ?3, ?4, ?5)",
         rusqlite::params!["tenant-1", "tenant@test.com", hash, "tenant", "Test Tenant"],
     );
-    let token = auth::generate_token("tenant-1", "tenant@test.com", "tenant").unwrap();
+    let token = auth::generate_token("tenant-1", "tenant@test.com", "tenant", "Test Tenant").unwrap();
     format!("token={}", token)
 }
 
@@ -75,7 +75,7 @@ mod auth_tests {
     #[test]
     fn test_generate_and_validate_token() {
         setup(); // ensures SESSION_SECRET is set
-        let token = auth::generate_token("user-123", "user@example.com", "tenant").unwrap();
+        let token = auth::generate_token("user-123", "user@example.com", "tenant", "Test User").unwrap();
         let claims = auth::validate_token(&token).unwrap();
         assert_eq!(claims.sub, "user-123");
         assert_eq!(claims.email, "user@example.com");
@@ -102,7 +102,7 @@ mod auth_tests {
     #[test]
     fn test_token_contains_expiry_in_future() {
         setup();
-        let token = auth::generate_token("u1", "e@e.com", "landlord").unwrap();
+        let token = auth::generate_token("u1", "e@e.com", "landlord", "Test").unwrap();
         let claims = auth::validate_token(&token).unwrap();
         let now = chrono::Utc::now().timestamp() as usize;
         assert!(claims.exp > now);

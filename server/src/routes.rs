@@ -298,30 +298,33 @@ async fn login(Json(body): Json<LoginRequest>) -> Result<impl IntoResponse, impl
         )
     })?;
 
-    let db = get_db();
+    // Scope the DB lock so it is released before generate_token (which also
+    // acquires the lock internally to create a session row).
+    let (id, email, password_hash, role, name) = {
+        let db = get_db();
+        let row = db.query_row(
+            "SELECT id, email, password_hash, role, name FROM users WHERE email = ?1",
+            rusqlite::params![body.email],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        );
 
-    let row = db.query_row(
-        "SELECT id, email, password_hash, role, name FROM users WHERE email = ?1",
-        rusqlite::params![body.email],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        },
-    );
-
-    let (id, email, password_hash, role, name) = match row {
-        Ok(r) => r,
-        Err(_) => {
-            record_failed_login(&rate_limit_key);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "Invalid credentials", "field": "email"})),
-            ))
+        match row {
+            Ok(r) => r,
+            Err(_) => {
+                record_failed_login(&rate_limit_key);
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({"error": "Invalid credentials", "field": "email"})),
+                ))
+            }
         }
     };
 

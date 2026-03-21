@@ -9,31 +9,31 @@ use crate::state::auth::AuthState;
 pub fn Header() -> impl IntoView {
     let (mobile_open, set_mobile_open) = signal(false);
 
-    // Try to get auth context — None if we're on a public page
-    let auth = leptos::context::use_context::<AuthState>();
+    // Try to get auth context — None if we're on a public page.
+    // Extract the user ReadSignal (which is Copy) so closures don't fight over ownership.
+    let auth_user: Option<ReadSignal<Option<mason_wheeler_shared::User>>> =
+        leptos::context::use_context::<AuthState>().map(|a| a.user);
 
-    let is_logged_in = move || {
-        auth.as_ref()
-            .and_then(|a| a.user.get())
-            .is_some()
-    };
+    let is_logged_in = Signal::derive(move || {
+        auth_user.and_then(|u| u.get()).is_some()
+    });
 
-    let is_landlord = move || {
-        auth.as_ref()
-            .and_then(|a| a.user.get())
+    let is_landlord = Signal::derive(move || {
+        auth_user
+            .and_then(|u| u.get())
             .map(|u| u.role == "landlord")
             .unwrap_or(false)
-    };
+    });
 
     let user_name = Signal::derive(move || {
-        auth.as_ref()
-            .and_then(|a| a.user.get())
+        auth_user
+            .and_then(|u| u.get())
             .map(|u| u.name.clone())
             .unwrap_or_default()
     });
 
     let base_path = Signal::derive(move || {
-        if is_landlord() { "/admin".to_string() } else { "/tenant".to_string() }
+        if is_landlord.get() { "/admin".to_string() } else { "/tenant".to_string() }
     });
 
     let handle_logout = move |_| {
@@ -71,7 +71,7 @@ pub fn Header() -> impl IntoView {
 
                     // Desktop nav
                     <div class="hidden md:flex md:items-center md:space-x-1">
-                        <Show when=move || is_logged_in()>
+                        <Show when=move || is_logged_in.get()>
                             <A href={move || base_path.get()} attr:class=nav_link>"Dashboard"</A>
                             <A href={move || format!("{}/payments", base_path.get())} attr:class=nav_link>"Payments"</A>
                             <A href={move || format!("{}/documents", base_path.get())} attr:class=nav_link>"Documents"</A>
@@ -93,7 +93,7 @@ pub fn Header() -> impl IntoView {
                                         <div class="border-b border-stone-100 px-4 py-2">
                                             <p class="text-sm font-medium text-stone-900">{move || user_name.get()}</p>
                                         </div>
-                                        <Show when=move || is_landlord()>
+                                        <Show when=move || is_landlord.get()>
                                             <A href="/admin/reports" attr:class="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100">"Reports"</A>
                                             <A href="/admin/tenants" attr:class="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100">"Manage Tenants"</A>
                                         </Show>
@@ -109,7 +109,7 @@ pub fn Header() -> impl IntoView {
                         </Show>
 
                         // Public: show sign-in button
-                        <Show when=move || !is_logged_in()>
+                        <Show when=move || !is_logged_in.get()>
                             <A href="/login" attr:class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-stone-900 text-white hover:bg-stone-800 transition-colors">
                                 "Sign in"
                             </A>
@@ -141,7 +141,7 @@ pub fn Header() -> impl IntoView {
                 style:display=move || if mobile_open.get() { "" } else { "none" }
             >
                 <div class="px-4 py-3 space-y-0.5">
-                    <Show when=move || is_logged_in()>
+                    <Show when=move || is_logged_in.get()>
                         <A href={move || base_path.get()} attr:class=mobile_link>"Dashboard"</A>
                         <A href={move || format!("{}/payments", base_path.get())} attr:class=mobile_link>"Payments"</A>
                         <A href={move || format!("{}/documents", base_path.get())} attr:class=mobile_link>"Documents"</A>
@@ -155,7 +155,7 @@ pub fn Header() -> impl IntoView {
                             on:click=handle_logout
                         >"Sign out"</button>
                     </Show>
-                    <Show when=move || !is_logged_in()>
+                    <Show when=move || !is_logged_in.get()>
                         <A href="/login" attr:class=mobile_link>"Sign in"</A>
                     </Show>
                 </div>
