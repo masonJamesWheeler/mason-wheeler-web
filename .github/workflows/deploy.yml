@@ -1,0 +1,68 @@
+name: Deploy to VM
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-leptos
+        run: cargo install cargo-leptos --locked
+
+      - name: Build release
+        run: cargo leptos build --release
+
+      - name: SCP binary and site to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "target/release/mason-wheeler-app,target/site/"
+          target: /home/azureuser/app/_deploy_staging
+          strip_components: 0
+
+      - name: SSH to deploy and restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /home/azureuser/app
+
+            # Move binary into place
+            cp _deploy_staging/target/release/mason-wheeler-app ./mason-wheeler-app
+            chmod +x ./mason-wheeler-app
+
+            # Sync site directory
+            rsync -a --delete _deploy_staging/target/site/ ./site/
+
+            # Clean up staging
+            rm -rf _deploy_staging
+
+            # Restart the service
+            sudo systemctl restart mason-wheeler

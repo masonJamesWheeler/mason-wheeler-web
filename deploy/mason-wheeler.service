@@ -1,0 +1,19 @@
+[Unit]
+Description=Mason Wheeler Web (Leptos/Axum)
+After=network.target
+
+[Service]
+Type=simple
+User=azureuser
+Group=azureuser
+WorkingDirectory=/home/azureuser/app
+ExecStart=/home/azureuser/app/mason-wheeler-app
+EnvironmentFile=/home/azureuser/app/.env
+Environment=LEPTOS_SITE_ROOT=/home/azureuser/app/site
+Environment=LEPTOS_SITE_ADDR=127.0.0.1:3000
+Environment=DATABASE_PATH=/home/azureuser/app/data/app.db
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

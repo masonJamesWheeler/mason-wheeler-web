@@ -1,0 +1,66 @@
+[package]
+name = "mason-wheeler-app"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mason-wheeler-shared = { path = "../shared" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+
+# Leptos
+leptos = "0.7"
+leptos_router = "0.7"
+leptos_meta = "0.7"
+
+# SSR-only deps
+axum = { version = "0.7", optional = true, features = ["macros"] }
+tokio = { version = "1", optional = true, features = ["full"] }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["fs", "cors"] }
+leptos_axum = { version = "0.7", optional = true }
+mason-wheeler-server = { path = "../server", optional = true }
+dotenvy = { version = "0.15", optional = true }
+any_spawner = { version = "0.2", optional = true }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
+rusqlite = { version = "0.32", optional = true, features = ["bundled"] }
+
+# Hydration-only deps
+console_error_panic_hook = { version = "0.1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "Window", "Document", "HtmlDocument", "Location", "Storage",
+    "HtmlInputElement", "HtmlFormElement", "FormData", "File", "FileList",
+    "SubmitEvent", "Event", "MouseEvent",
+] }
+gloo-net = { version = "0.6", optional = true }
+
+[features]
+hydrate = [
+    "leptos/hydrate",
+    "console_error_panic_hook",
+    "wasm-bindgen",
+    "web-sys",
+    "gloo-net",
+]
+ssr = [
+    "axum",
+    "tokio",
+    "tower",
+    "tower-http",
+    "leptos_axum",
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+    "mason-wheeler-server",
+    "dotenvy",
+    "any_spawner",
+    "tracing-subscriber",
+    "rusqlite",
+]

@@ -1,0 +1,130 @@
+use rusqlite::Connection;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+static DB: OnceLock<Mutex<Connection>> = OnceLock::new();
+
+pub fn get_db() -> MutexGuard<'static, Connection> {
+    DB.get()
+        .expect("Database not initialized. Call init_db() first.")
+        .lock()
+        .expect("Failed to acquire database lock")
+}
+
+pub fn init_db() {
+    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "./data/app.db".to_string());
+
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+        std::fs::create_dir_all(parent).expect("Failed to create database directory");
+    }
+
+    let conn = Connection::open(&db_path).expect("Failed to open database");
+
+    conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
+    conn.execute_batch("PRAGMA foreign_keys=ON;").ok();
+
+    create_tables(&conn);
+    seed_default_landlord(&conn);
+
+    DB.set(Mutex::new(conn))
+        .expect("Database already initialized");
+}
+
+fn create_tables(conn: &Connection) {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('landlord', 'tenant')),
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS payments (
+            id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES users(id),
+            amount REAL NOT NULL,
+            payment_type TEXT NOT NULL,
+            description TEXT,
+            stripe_payment_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            due_date TEXT,
+            paid_date TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS utility_charges (
+            id TEXT PRIMARY KEY,
+            description TEXT NOT NULL,
+            amount REAL NOT NULL,
+            due_date TEXT NOT NULL,
+            paid INTEGER NOT NULL DEFAULT 0,
+            payment_id TEXT REFERENCES payments(id),
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_requests (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'submitted',
+            photo_path TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_messages (
+            id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL REFERENCES maintenance_requests(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            doc_type TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        ",
+    )
+    .expect("Failed to create tables");
+}
+
+fn seed_default_landlord(conn: &Connection) {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM users WHERE role = 'landlord'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if count == 0 {
+        let password_hash =
+            bcrypt::hash("changeme123", 10).expect("Failed to hash default password");
+
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, role, name) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                "landlord-1",
+                "mason@mason-wheeler.com",
+                password_hash,
+                "landlord",
+                "Mason Wheeler",
+            ],
+        )
+        .expect("Failed to seed default landlord user");
+    }
+}

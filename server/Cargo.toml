@@ -1,0 +1,30 @@
+[package]
+name = "mason-wheeler-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mason-wheeler-shared = { path = "../shared" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Auth
+jsonwebtoken = "9"
+bcrypt = "0.16"
+
+# Payments
+async-stripe = { version = "0.39", features = ["runtime-tokio-hyper-rustls", "checkout", "billing", "webhook-events"] }
+
+# Web
+axum = { version = "0.7", features = ["macros", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
