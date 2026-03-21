@@ -1,4 +1,5 @@
 use axum::{
+    body::Bytes,
     extract::Path,
     http::{header::SET_COOKIE, HeaderMap, StatusCode},
     response::IntoResponse,
@@ -83,7 +84,9 @@ pub fn api_router() -> Router {
 
     let document_routes = Router::new().route("/", get(list_documents));
 
-    let payment_routes = Router::new().route("/create-checkout", post(create_checkout));
+    let payment_routes = Router::new()
+        .route("/create-checkout", post(create_checkout))
+        .route("/webhook", post(stripe_webhook));
 
     let disclosure_routes = crate::disclosures::disclosures_router();
 
@@ -642,15 +645,162 @@ async fn update_maintenance(
 // Payment routes
 // ---------------------------------------------------------------------------
 
+#[derive(Deserialize)]
+struct CheckoutRequest {
+    /// Amount in dollars; defaults to 3250.00 (monthly rent) if omitted.
+    amount: Option<f64>,
+    /// Optional description for the line item.
+    description: Option<String>,
+}
+
 #[derive(Serialize)]
 struct CheckoutResponse {
     url: String,
 }
 
-async fn create_checkout(headers: HeaderMap) -> Result<Json<CheckoutResponse>, StatusCode> {
-    let _user = extract_user(&headers)?;
+async fn create_checkout(
+    headers: HeaderMap,
+    body: Option<Json<CheckoutRequest>>,
+) -> Result<Json<CheckoutResponse>, StatusCode> {
+    let user = extract_user(&headers)?;
 
-    Ok(Json(CheckoutResponse {
-        url: "/tenant/payments?success=true".to_string(),
-    }))
+    let stripe_secret =
+        std::env::var("STRIPE_SECRET_KEY").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let amount_dollars = body
+        .as_ref()
+        .and_then(|b| b.amount)
+        .unwrap_or(3250.00);
+    let description = body
+        .as_ref()
+        .and_then(|b| b.description.clone())
+        .unwrap_or_else(|| "Rent Payment".to_string());
+
+    // Stripe expects amounts in cents
+    let amount_cents = (amount_dollars * 100.0).round() as i64;
+
+    let client = stripe::Client::new(&stripe_secret);
+
+    let success_url = "https://mason-wheeler.com/tenant/payments?success=true";
+    let cancel_url = "https://mason-wheeler.com/tenant/payments?cancelled=true";
+
+    let mut params = stripe::CreateCheckoutSession::new();
+    params.success_url = Some(success_url);
+    params.cancel_url = Some(cancel_url);
+    params.mode = Some(stripe::CheckoutSessionMode::Payment);
+    params.payment_method_types = Some(vec![
+        stripe::CreateCheckoutSessionPaymentMethodTypes::UsBankAccount,
+        stripe::CreateCheckoutSessionPaymentMethodTypes::Card,
+    ]);
+    params.line_items = Some(vec![stripe::CreateCheckoutSessionLineItems {
+        price_data: Some(stripe::CreateCheckoutSessionLineItemsPriceData {
+            currency: stripe::Currency::USD,
+            product_data: Some(
+                stripe::CreateCheckoutSessionLineItemsPriceDataProductData {
+                    name: description.clone(),
+                    ..Default::default()
+                },
+            ),
+            unit_amount: Some(amount_cents),
+            ..Default::default()
+        }),
+        quantity: Some(1),
+        ..Default::default()
+    }]);
+    params.metadata = Some(
+        [
+            ("user_id".to_string(), user.id.clone()),
+            ("description".to_string(), description),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let session = stripe::CheckoutSession::create(&client, params)
+        .await
+        .map_err(|e| {
+            tracing::error!("Stripe checkout session creation failed: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let url = session.url.ok_or_else(|| {
+        tracing::error!("Stripe returned no checkout URL");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(CheckoutResponse { url }))
+}
+
+// ---------------------------------------------------------------------------
+// Stripe webhook
+// ---------------------------------------------------------------------------
+
+async fn stripe_webhook(
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let webhook_secret =
+        std::env::var("STRIPE_WEBHOOK_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let sig = headers
+        .get("stripe-signature")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    let payload = std::str::from_utf8(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let event = stripe::Webhook::construct_event(payload, sig, &webhook_secret).map_err(|e| {
+        tracing::error!("Webhook signature verification failed: {}", e);
+        StatusCode::BAD_REQUEST
+    })?;
+
+    if event.type_ == stripe::EventType::CheckoutSessionCompleted {
+        if let stripe::EventObject::CheckoutSession(session) = event.data.object {
+            let amount = session.amount_total.unwrap_or(0) as f64 / 100.0;
+            let stripe_payment_id = session.payment_intent.map(|pi| match pi {
+                stripe::Expandable::Id(id) => id.to_string(),
+                stripe::Expandable::Object(obj) => obj.id.to_string(),
+            });
+            let user_id = session
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("user_id").cloned());
+            let description = session
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("description").cloned())
+                .unwrap_or_else(|| "Rent Payment".to_string());
+
+            let payment_id = Uuid::new_v4().to_string();
+            let now = chrono::Utc::now().to_rfc3339();
+
+            let db = get_db();
+            let result = db.execute(
+                "INSERT INTO payments (id, user_id, amount, payment_type, description, stripe_payment_id, status, paid_date, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'completed', ?7, ?7)",
+                rusqlite::params![
+                    payment_id,
+                    user_id,
+                    amount,
+                    "stripe",
+                    description,
+                    stripe_payment_id,
+                    now,
+                ],
+            );
+
+            if let Err(e) = result {
+                tracing::error!("Failed to record payment from webhook: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+
+            tracing::info!(
+                payment_id = %payment_id,
+                amount = %amount,
+                "Payment recorded from checkout.session.completed"
+            );
+        }
+    }
+
+    Ok(Json(serde_json::json!({ "received": true })))
 }
