@@ -187,3 +187,10 @@ jobs:
             fi
 
             echo "Deploy complete at $(date)"
+
+            # Diagnose current app state
+            echo "=== Current app status ==="
+            sudo systemctl is-active mason-wheeler-app.service || true
+            sudo journalctl -u mason-wheeler-app.service --no-pager -n 40 || true
+            echo "=== Checking if app responds ==="
+            curl -sf --max-time 5 http://127.0.0.1:3000 > /dev/null 2>&1 && echo "App responding OK" || echo "App NOT responding"
