@@ -110,3 +110,93 @@ pub struct DashboardData {
     pub active_maintenance: Vec<MaintenanceRequest>,
     pub utility_charges: Vec<UtilityCharge>,
 }
+
+// ---------------------------------------------------------------------------
+// Move-In Checklist
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChecklistItem {
+    pub id: String,
+    pub room: String,
+    pub item: String,
+    pub condition: String, // "good", "fair", "poor", "damaged", "n/a"
+    pub notes: Option<String>,
+    pub photo_path: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChecklistRoom {
+    pub name: String,
+    pub items: Vec<ChecklistItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoveInChecklist {
+    pub id: String,
+    pub property_address: String,
+    pub tenant_name: String,
+    pub landlord_name: String,
+    pub move_in_date: String,
+    pub tenant_signed: bool,
+    pub landlord_signed: bool,
+    pub rooms: Vec<ChecklistRoom>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateChecklistRequest {
+    pub tenant_name: String,
+    pub move_in_date: String,
+    pub items: Vec<CreateChecklistItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateChecklistItem {
+    pub room: String,
+    pub item: String,
+    pub condition: String,
+    pub notes: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Legal Disclosures
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeadPaintDisclosure {
+    pub property_address: String,
+    pub year_built: i32,
+    pub known_lead_paint: bool,
+    pub known_hazards_description: Option<String>,
+    pub records_available: bool,
+    pub records_description: Option<String>,
+    pub tenant_name: String,
+    pub landlord_name: String,
+    pub tenant_acknowledged: bool,
+    pub landlord_signed: bool,
+    pub date: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DepositReceipt {
+    pub tenant_name: String,
+    pub property_address: String,
+    pub deposit_amount: f64,
+    pub deposit_type: String, // "security", "pet", "last_month"
+    pub depository_name: String,
+    pub depository_address: String,
+    pub date_received: String,
+    pub landlord_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LandlordContactInfo {
+    pub name: String,
+    pub mailing_address: String,
+    pub phone: String,
+    pub email: String,
+    pub emergency_contact: Option<String>,
+    pub emergency_phone: Option<String>,
+}

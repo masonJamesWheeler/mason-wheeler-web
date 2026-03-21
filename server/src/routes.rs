@@ -16,14 +16,14 @@ use crate::db::get_db;
 // Auth extractor helper
 // ---------------------------------------------------------------------------
 
-struct AuthUser {
-    id: String,
-    email: String,
-    role: String,
-    name: String,
+pub struct AuthUser {
+    pub id: String,
+    pub email: String,
+    pub role: String,
+    pub name: String,
 }
 
-fn extract_user(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
+pub fn extract_user(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
     let cookie_header = headers
         .get("cookie")
         .and_then(|v| v.to_str().ok())
@@ -85,6 +85,8 @@ pub fn api_router() -> Router {
 
     let payment_routes = Router::new().route("/create-checkout", post(create_checkout));
 
+    let disclosure_routes = crate::disclosures::disclosures_router();
+
     Router::new()
         .nest("/auth", auth_routes)
         .nest("/tenant", tenant_routes)
@@ -92,6 +94,7 @@ pub fn api_router() -> Router {
         .nest("/maintenance", maintenance_routes)
         .nest("/documents", document_routes)
         .nest("/payments", payment_routes)
+        .nest("/disclosures", disclosure_routes)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+#![allow(unused)]
 use leptos::prelude::*;
 use mason_wheeler_shared::MaintenanceRequest;
 

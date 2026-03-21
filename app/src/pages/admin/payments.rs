@@ -1,5 +1,6 @@
+#![allow(unused)]
 use leptos::prelude::*;
-use mason_wheeler_shared::{Payment, UtilityCharge};
+use mason_wheeler_shared::Payment;
 
 #[component]
 pub fn AdminPayments() -> impl IntoView {

@@ -97,6 +97,68 @@ fn create_tables(conn: &Connection) {
             file_path TEXT NOT NULL,
             uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS move_in_checklists (
+            id TEXT PRIMARY KEY,
+            property_address TEXT NOT NULL,
+            tenant_name TEXT NOT NULL,
+            landlord_name TEXT NOT NULL,
+            move_in_date TEXT NOT NULL,
+            tenant_signed INTEGER NOT NULL DEFAULT 0,
+            landlord_signed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS checklist_items (
+            id TEXT PRIMARY KEY,
+            checklist_id TEXT NOT NULL REFERENCES move_in_checklists(id),
+            room TEXT NOT NULL,
+            item TEXT NOT NULL,
+            condition TEXT NOT NULL DEFAULT 'good',
+            notes TEXT,
+            photo_path TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS lead_paint_disclosures (
+            id TEXT PRIMARY KEY,
+            property_address TEXT NOT NULL,
+            year_built INTEGER NOT NULL,
+            known_lead_paint INTEGER NOT NULL DEFAULT 0,
+            known_hazards_description TEXT,
+            records_available INTEGER NOT NULL DEFAULT 0,
+            records_description TEXT,
+            tenant_name TEXT NOT NULL,
+            landlord_name TEXT NOT NULL,
+            tenant_acknowledged INTEGER NOT NULL DEFAULT 0,
+            landlord_signed INTEGER NOT NULL DEFAULT 0,
+            date_signed TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS deposit_receipts (
+            id TEXT PRIMARY KEY,
+            tenant_name TEXT NOT NULL,
+            property_address TEXT NOT NULL,
+            deposit_amount REAL NOT NULL,
+            deposit_type TEXT NOT NULL DEFAULT 'security',
+            depository_name TEXT NOT NULL,
+            depository_address TEXT NOT NULL,
+            date_received TEXT NOT NULL,
+            landlord_name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS landlord_contact (
+            id TEXT PRIMARY KEY DEFAULT 'main',
+            name TEXT NOT NULL,
+            mailing_address TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            email TEXT NOT NULL,
+            emergency_contact TEXT,
+            emergency_phone TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         ",
     )
     .expect("Failed to create tables");
@@ -126,5 +188,28 @@ fn seed_default_landlord(conn: &Connection) {
             ],
         )
         .expect("Failed to seed default landlord user");
+    }
+
+    // Seed default landlord contact info
+    let contact_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM landlord_contact WHERE id = 'main'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if contact_count == 0 {
+        conn.execute(
+            "INSERT INTO landlord_contact (id, name, mailing_address, phone, email) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                "main",
+                "Mason Wheeler",
+                "8404 12th Ave S, Seattle, WA 98108",
+                "",
+                "mason@mason-wheeler.com",
+            ],
+        )
+        .expect("Failed to seed landlord contact info");
     }
 }

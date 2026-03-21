@@ -66,3 +66,13 @@ jobs:
 
             # Restart the service
             sudo systemctl restart mason-wheeler
+
+      - name: Verify Key Vault access
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            az login --identity && az keyvault secret show --vault-name mason-wheeler-kv --name stripe-secret-key --query value -o tsv > /dev/null

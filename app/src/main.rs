@@ -2,11 +2,10 @@
 #[tokio::main]
 async fn main() {
     use axum::Router;
-    use leptos::prelude::*;
     use leptos_axum::{file_and_error_handler, generate_route_list, LeptosRoutes};
     use mason_wheeler_app::app::{shell, App};
     use tower_http::services::ServeDir;
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::EnvFilter;
 
     dotenvy::dotenv().ok();
 

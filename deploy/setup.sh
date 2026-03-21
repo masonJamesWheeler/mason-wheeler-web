@@ -16,12 +16,34 @@ echo "=== Mason Wheeler Web - VM Setup ==="
 echo "Creating application directories..."
 mkdir -p "$APP_DIR" "$DATA_DIR" "${APP_DIR}/site"
 
-# Create a placeholder .env if it doesn't exist
-if [ ! -f "${APP_DIR}/.env" ]; then
-    touch "${APP_DIR}/.env"
-    echo "# Add environment variables here" > "${APP_DIR}/.env"
-    echo "Created empty ${APP_DIR}/.env (add secrets here)"
+# Install Azure CLI if not present
+if ! command -v az &>/dev/null; then
+    echo "Installing Azure CLI..."
+    sudo apt-get update -y
+    sudo apt-get install -y azure-cli
+else
+    echo "Azure CLI already installed."
 fi
+
+# Login using the VM's managed identity
+echo "Logging in with managed identity..."
+az login --identity
+
+# Pull secrets from Key Vault and write .env
+echo "Pulling secrets from Key Vault..."
+STRIPE_SECRET_KEY=$(az keyvault secret show --vault-name mason-wheeler-kv --name stripe-secret-key --query value -o tsv)
+STRIPE_PUBLIC_KEY=$(az keyvault secret show --vault-name mason-wheeler-kv --name stripe-publishable-key --query value -o tsv)
+SESSION_SECRET=$(az keyvault secret show --vault-name mason-wheeler-kv --name session-secret --query value -o tsv)
+
+cat > "${APP_DIR}/.env" <<EOF
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+STRIPE_PUBLIC_KEY=${STRIPE_PUBLIC_KEY}
+SESSION_SECRET=${SESSION_SECRET}
+DATABASE_PATH=/home/azureuser/app/data/app.db
+EOF
+
+chmod 600 "${APP_DIR}/.env"
+echo "Wrote secrets to ${APP_DIR}/.env"
 
 # Install systemd service
 echo "Installing systemd service..."

@@ -1,3 +1,4 @@
+#![allow(unused)]
 use leptos::prelude::*;
 use leptos_router::components::A;
 
