@@ -5,10 +5,8 @@ use mason_wheeler_shared::Document;
 #[cfg(feature = "hydrate")]
 fn fetch_documents(set_documents: WriteSignal<Vec<Document>>) {
     leptos::task::spawn_local(async move {
-        if let Ok(resp) = gloo_net::http::Request::get("/api/documents").send().await {
-            if let Ok(data) = resp.json::<Vec<Document>>().await {
-                set_documents.set(data);
-            }
+        if let Ok(data) = crate::api::client::api_get::<Vec<Document>>("/api/documents").await {
+            set_documents.set(data);
         }
     });
 }
@@ -41,13 +39,8 @@ fn upload_file(dtype: String, file: web_sys::File, set_documents: WriteSignal<Ve
 #[cfg(feature = "hydrate")]
 fn delete_doc(id: String, set_documents: WriteSignal<Vec<Document>>) {
     leptos::task::spawn_local(async move {
-        if let Ok(resp) = gloo_net::http::Request::delete(&format!("/api/documents/{}", id))
-            .send()
-            .await
-        {
-            if resp.ok() {
-                fetch_documents(set_documents);
-            }
+        if crate::api::client::api_delete(&format!("/api/documents/{}", id)).await.is_ok() {
+            fetch_documents(set_documents);
         }
     });
 }

@@ -11,10 +11,8 @@ pub fn TenantDocuments() -> impl IntoView {
     #[cfg(feature = "hydrate")]
     {
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/documents").send().await {
-                if let Ok(data) = resp.json::<Vec<Document>>().await {
-                    set_documents.set(data);
-                }
+            if let Ok(data) = crate::api::client::api_get::<Vec<Document>>("/api/documents").await {
+                set_documents.set(data);
             }
             set_loading.set(false);
         });

@@ -22,17 +22,12 @@ pub fn ForgotPasswordPage() -> impl IntoView {
                     "email": email_val,
                 });
 
-                match gloo_net::http::Request::post("/api/auth/forgot-password")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    Ok(_resp) => {
+                match crate::api::client::api_post_no_body("/api/auth/forgot-password", &body).await {
+                    Ok(()) => {
                         set_submitted.set(true);
                     }
-                    Err(_) => {
-                        set_error.set(Some("Unable to connect. Please try again.".to_string()));
+                    Err(e) => {
+                        set_error.set(Some(e.message));
                     }
                 }
                 set_loading.set(false);

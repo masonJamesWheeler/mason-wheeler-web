@@ -11,10 +11,8 @@ pub fn AdminDashboard() -> impl IntoView {
     #[cfg(feature = "hydrate")]
     {
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/admin/dashboard").send().await {
-                if let Ok(d) = resp.json::<DashboardData>().await {
-                    set_data.set(Some(d));
-                }
+            if let Ok(d) = crate::api::client::api_get::<DashboardData>("/api/admin/dashboard").await {
+                set_data.set(Some(d));
             }
         });
     }

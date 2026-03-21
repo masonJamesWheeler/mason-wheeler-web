@@ -46,29 +46,12 @@ pub fn ApplyPage() -> impl IntoView {
                     "message": if message_val.is_empty() { None } else { Some(message_val) },
                 });
 
-                match gloo_net::http::Request::post("/api/apply")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.ok() => {
+                match crate::api::client::api_post_no_body("/api/apply", &body).await {
+                    Ok(()) => {
                         set_success.set(true);
                     }
-                    Ok(resp) => {
-                        if let Ok(err) = resp.json::<serde_json::Value>().await {
-                            set_error.set(Some(
-                                err.get("error")
-                                    .and_then(|e| e.as_str())
-                                    .unwrap_or("Something went wrong. Please try again.")
-                                    .to_string(),
-                            ));
-                        } else {
-                            set_error.set(Some("Something went wrong. Please try again.".to_string()));
-                        }
-                    }
-                    Err(_) => {
-                        set_error.set(Some("Network error. Please check your connection and try again.".to_string()));
+                    Err(e) => {
+                        set_error.set(Some(e.message));
                     }
                 }
                 set_submitting.set(false);
@@ -93,7 +76,6 @@ pub fn ApplyPage() -> impl IntoView {
                     </div>
                 </div>
 
-                // Success state
                 <Show when=move || success.get()>
                     <div class="rounded-xl border border-green-200 bg-green-50 p-8 text-center">
                         <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
@@ -114,7 +96,6 @@ pub fn ApplyPage() -> impl IntoView {
                     </div>
                 </Show>
 
-                // Form
                 <Show when=move || !success.get()>
                     <div class="rounded-xl border border-stone-200 bg-white p-6 sm:p-8 shadow-sm">
                         // Error message

@@ -48,39 +48,22 @@ pub fn LoginPage() -> impl IntoView {
                     "password": password_val,
                 });
 
-                match gloo_net::http::Request::post("/api/auth/login")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        if resp.ok() {
-                            if let Ok(data) = resp.json::<serde_json::Value>().await {
-                                let role = data
-                                    .get("user")
-                                    .and_then(|u| u.get("role"))
-                                    .and_then(|r| r.as_str())
-                                    .unwrap_or("tenant");
+                match crate::api::client::api_post::<serde_json::Value>("/api/auth/login", &body).await {
+                    Ok(data) => {
+                        let role = data
+                            .get("user")
+                            .and_then(|u| u.get("role"))
+                            .and_then(|r| r.as_str())
+                            .unwrap_or("tenant");
 
-                                let redirect = if role == "landlord" { "/admin" } else { "/tenant" };
+                        let redirect = if role == "landlord" { "/admin" } else { "/tenant" };
 
-                                if let Some(window) = web_sys::window() {
-                                    let _ = window.location().set_href(redirect);
-                                }
-                            }
-                        } else {
-                            let msg = resp
-                                .json::<serde_json::Value>()
-                                .await
-                                .ok()
-                                .and_then(|v| v.get("error").and_then(|e| e.as_str().map(String::from)))
-                                .unwrap_or_else(|| "Invalid credentials".to_string());
-                            set_error.set(Some(msg));
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.location().set_href(redirect);
                         }
                     }
-                    Err(_) => {
-                        set_error.set(Some("Unable to connect. Please try again.".to_string()));
+                    Err(e) => {
+                        set_error.set(Some(e.message));
                     }
                 }
                 set_loading.set(false);
@@ -107,8 +90,6 @@ pub fn LoginPage() -> impl IntoView {
                         <p class="text-sm text-red-700">{move || error.get().unwrap_or_default()}</p>
                     </div>
                 </Show>
-
-                // Form
                 <form on:submit=on_submit class="space-y-4">
                     <div>
                         <label class="block text-xs font-medium text-stone-500 mb-1.5 ml-1" for="email">"Email"</label>

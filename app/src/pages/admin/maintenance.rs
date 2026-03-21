@@ -33,11 +33,9 @@ pub fn AdminMaintenance() -> impl IntoView {
                 if status_val != "all" {
                     url.push_str(&format!("&status={}", status_val));
                 }
-                if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
-                    if let Ok(data) = resp.json::<PaginatedResponse<MaintenanceRequest>>().await {
-                        set_total_items.set(data.total);
-                        set_requests.set(data.items);
-                    }
+                if let Ok(data) = crate::api::client::api_get::<PaginatedResponse<MaintenanceRequest>>(&url).await {
+                    set_total_items.set(data.total);
+                    set_requests.set(data.items);
                 }
                 set_loading.set(false);
             });

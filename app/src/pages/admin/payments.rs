@@ -34,11 +34,9 @@ pub fn AdminPayments() -> impl IntoView {
                 if status_val != "all" {
                     url.push_str(&format!("&status={}", status_val));
                 }
-                if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
-                    if let Ok(data) = resp.json::<PaginatedResponse<Payment>>().await {
-                        set_total_items.set(data.total);
-                        set_payments.set(data.items);
-                    }
+                if let Ok(data) = crate::api::client::api_get::<PaginatedResponse<Payment>>(&url).await {
+                    set_total_items.set(data.total);
+                    set_payments.set(data.items);
                 }
                 set_loading.set(false);
             });
@@ -98,18 +96,11 @@ pub fn AdminPayments() -> impl IntoView {
                     "due_date": due,
                 });
 
-                if let Ok(resp) = gloo_net::http::Request::post("/api/admin/utilities")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        set_show_utility_form.set(false);
-                        set_util_desc.set(String::new());
-                        set_util_amount.set(String::new());
-                        set_util_due.set(String::new());
-                    }
+                if crate::api::client::api_post_no_body("/api/admin/utilities", &body).await.is_ok() {
+                    set_show_utility_form.set(false);
+                    set_util_desc.set(String::new());
+                    set_util_amount.set(String::new());
+                    set_util_due.set(String::new());
                 }
                 set_submitting.set(false);
             });

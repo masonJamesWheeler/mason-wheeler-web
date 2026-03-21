@@ -21,10 +21,8 @@ pub fn TenantMaintenance() -> impl IntoView {
     #[cfg(feature = "hydrate")]
     {
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/maintenance").send().await {
-                if let Ok(data) = resp.json::<Vec<MaintenanceRequest>>().await {
-                    set_requests.set(data);
-                }
+            if let Ok(data) = crate::api::client::api_get::<Vec<MaintenanceRequest>>("/api/maintenance").await {
+                set_requests.set(data);
             }
             set_loading.set(false);
         });
@@ -63,20 +61,11 @@ pub fn TenantMaintenance() -> impl IntoView {
                     "description": desc_val,
                 });
 
-                if let Ok(resp) = gloo_net::http::Request::post("/api/maintenance")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        if let Ok(req) = resp.json::<MaintenanceRequest>().await {
-                            set_requests.update(|r| r.insert(0, req));
-                        }
-                        set_show_form.set(false);
-                        set_title.set(String::new());
-                        set_description.set(String::new());
-                    }
+                if let Ok(req) = crate::api::client::api_post::<MaintenanceRequest>("/api/maintenance", &body).await {
+                    set_requests.update(|r| r.insert(0, req));
+                    set_show_form.set(false);
+                    set_title.set(String::new());
+                    set_description.set(String::new());
                 }
                 set_submitting.set(false);
             });
@@ -96,13 +85,8 @@ pub fn TenantMaintenance() -> impl IntoView {
             {
                 let id_clone = id.clone();
                 leptos::task::spawn_local(async move {
-                    if let Ok(resp) = gloo_net::http::Request::get(&format!("/api/maintenance/{}/messages", id_clone))
-                        .send()
-                        .await
-                    {
-                        if let Ok(data) = resp.json::<Vec<MaintenanceMessage>>().await {
-                            set_messages.set(data);
-                        }
+                    if let Ok(data) = crate::api::client::api_get::<Vec<MaintenanceMessage>>(&format!("/api/maintenance/{}/messages", id_clone)).await {
+                        set_messages.set(data);
                     }
                 });
             }
@@ -122,18 +106,9 @@ pub fn TenantMaintenance() -> impl IntoView {
             let req_id = request_id.clone();
             leptos::task::spawn_local(async move {
                 let body = serde_json::json!({ "message": msg_val });
-                if let Ok(resp) = gloo_net::http::Request::post(&format!("/api/maintenance/{}/messages", req_id))
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        if let Ok(msg) = resp.json::<MaintenanceMessage>().await {
-                            set_messages.update(|m| m.push(msg));
-                        }
-                        set_new_message.set(String::new());
-                    }
+                if let Ok(msg) = crate::api::client::api_post::<MaintenanceMessage>(&format!("/api/maintenance/{}/messages", req_id), &body).await {
+                    set_messages.update(|m| m.push(msg));
+                    set_new_message.set(String::new());
                 }
                 set_sending_message.set(false);
             });

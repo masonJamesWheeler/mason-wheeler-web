@@ -58,30 +58,19 @@ pub fn ResetPasswordPage() -> impl IntoView {
                     "new_password": password_val,
                 });
 
-                match gloo_net::http::Request::post("/api/auth/reset-password")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        if resp.ok() {
-                            set_success.set(true);
-                            // Redirect to login after 2 seconds
-                            leptos::task::spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                                if let Some(window) = web_sys::window() {
-                                    let _ = window.location().set_href("/login");
-                                }
-                            });
-                        } else {
-                            set_error.set(Some(
-                                "Invalid or expired reset link. Please request a new one.".to_string(),
-                            ));
-                        }
+                match crate::api::client::api_post_no_body("/api/auth/reset-password", &body).await {
+                    Ok(()) => {
+                        set_success.set(true);
+                        // Redirect to login after 2 seconds
+                        leptos::task::spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            if let Some(window) = web_sys::window() {
+                                let _ = window.location().set_href("/login");
+                            }
+                        });
                     }
-                    Err(_) => {
-                        set_error.set(Some("Unable to connect. Please try again.".to_string()));
+                    Err(e) => {
+                        set_error.set(Some(e.message));
                     }
                 }
                 set_loading.set(false);

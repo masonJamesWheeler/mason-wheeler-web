@@ -25,11 +25,9 @@ pub fn TenantPayments() -> impl IntoView {
                 if !search_val.is_empty() {
                     url.push_str(&format!("&search={}", search_val.replace('%', "%25").replace('&', "%26").replace('=', "%3D").replace(' ', "%20").replace('+', "%2B")));
                 }
-                if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
-                    if let Ok(data) = resp.json::<PaginatedResponse<Payment>>().await {
-                        set_total_items.set(data.total);
-                        set_payments.set(data.items);
-                    }
+                if let Ok(data) = crate::api::client::api_get::<PaginatedResponse<Payment>>(&url).await {
+                    set_total_items.set(data.total);
+                    set_payments.set(data.items);
                 }
                 set_loading.set(false);
             });
@@ -40,10 +38,8 @@ pub fn TenantPayments() -> impl IntoView {
     #[cfg(feature = "hydrate")]
     {
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/tenant/utilities").send().await {
-                if let Ok(data) = resp.json::<Vec<UtilityCharge>>().await {
-                    set_utilities.set(data);
-                }
+            if let Ok(data) = crate::api::client::api_get::<Vec<UtilityCharge>>("/api/tenant/utilities").await {
+                set_utilities.set(data);
             }
         });
     }
@@ -81,17 +77,10 @@ pub fn TenantPayments() -> impl IntoView {
         #[cfg(feature = "hydrate")]
         {
             leptos::task::spawn_local(async move {
-                if let Ok(resp) = gloo_net::http::Request::post("/api/payments/create-checkout")
-                    .json(&serde_json::json!({ "type": "rent", "amount": 3250.0 }))
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if let Ok(data) = resp.json::<serde_json::Value>().await {
-                        if let Some(url) = data.get("url").and_then(|u| u.as_str()) {
-                            if let Some(window) = web_sys::window() {
-                                let _ = window.location().set_href(url);
-                            }
+                if let Ok(data) = crate::api::client::api_post::<serde_json::Value>("/api/payments/create-checkout", &serde_json::json!({ "type": "rent", "amount": 3250.0 })).await {
+                    if let Some(url) = data.get("url").and_then(|u| u.as_str()) {
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.location().set_href(url);
                         }
                     }
                 }
@@ -134,17 +123,10 @@ pub fn TenantPayments() -> impl IntoView {
                                 #[cfg(feature = "hydrate")]
                                 {
                                     leptos::task::spawn_local(async move {
-                                        if let Ok(resp) = gloo_net::http::Request::post("/api/payments/create-utility-checkout")
-                                            .json(&serde_json::json!({ "utility_charge_id": charge_id }))
-                                            .unwrap()
-                                            .send()
-                                            .await
-                                        {
-                                            if let Ok(data) = resp.json::<serde_json::Value>().await {
-                                                if let Some(url) = data.get("url").and_then(|u| u.as_str()) {
-                                                    if let Some(window) = web_sys::window() {
-                                                        let _ = window.location().set_href(url);
-                                                    }
+                                        if let Ok(data) = crate::api::client::api_post::<serde_json::Value>("/api/payments/create-utility-checkout", &serde_json::json!({ "utility_charge_id": charge_id })).await {
+                                            if let Some(url) = data.get("url").and_then(|u| u.as_str()) {
+                                                if let Some(window) = web_sys::window() {
+                                                    let _ = window.location().set_href(url);
                                                 }
                                             }
                                         }

@@ -12,17 +12,12 @@ pub fn TenantDashboard() -> impl IntoView {
     #[cfg(feature = "hydrate")]
     {
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/tenant/dashboard")
-                .send()
-                .await
-            {
-                if let Ok(data) = resp.json::<mason_wheeler_shared::DashboardData>().await {
-                    set_balance.set(data.amount_due);
-                    if let Some(date) = data.next_due_date {
-                        set_next_due.set(date);
-                    }
-                    set_maintenance_count.set(data.active_maintenance.len() as u32);
+            if let Ok(data) = crate::api::client::api_get::<mason_wheeler_shared::DashboardData>("/api/tenant/dashboard").await {
+                set_balance.set(data.amount_due);
+                if let Some(date) = data.next_due_date {
+                    set_next_due.set(date);
                 }
+                set_maintenance_count.set(data.active_maintenance.len() as u32);
             }
         });
     }
