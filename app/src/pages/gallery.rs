@@ -25,6 +25,8 @@ const PHOTOS: &[(&str, &str, &str)] = &[
     ("backyard-sliding-doors-patio.jpg", "Patio with chairs", "Outdoor"),
     ("aerial-drone-rear-yard.jpg", "Aerial view, rear of property", "Aerial"),
     ("aerial-drone-overhead-lot-outline.jpg", "Overhead lot view", "Aerial"),
+    ("lorettas.jpg", "Loretta's — live music venue nearby", "Neighborhood"),
+    ("south-park-playfield.jpg", "South Park Playfield — sports fields and community center", "Neighborhood"),
 ];
 
 #[component]
