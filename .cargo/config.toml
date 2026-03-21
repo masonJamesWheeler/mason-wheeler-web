@@ -1,0 +1,8 @@
+[env]
+# Default test DB path
+DATABASE_PATH = { value = "./data/test.db", force = false }
+
+# Work around rust-lld crash (SIGBUS in CustomSection::writeTo)
+# by limiting codegen units and disabling debug info for WASM targets
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "codegen-units=1", "-C", "debuginfo=0"]

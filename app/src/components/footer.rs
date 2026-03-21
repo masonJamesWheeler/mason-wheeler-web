@@ -8,8 +8,8 @@ pub fn Footer() -> impl IntoView {
                 <p>"© 2026 Mason Wheeler — 8404 12th Ave S, Seattle, WA 98108"</p>
                 <p class="mt-1">
                     "Questions? Contact "
-                    <a href="mailto:mason@mason-wheeler.com" class="text-orange-600 hover:underline">
-                        "mason@mason-wheeler.com"
+                    <a href="mailto:masonwheeler@fieldflow.us" class="text-orange-600 hover:underline">
+                        "masonwheeler@fieldflow.us"
                     </a>
                 </p>
             </div>

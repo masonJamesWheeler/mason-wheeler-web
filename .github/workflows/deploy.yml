@@ -1,12 +1,16 @@
-name: Deploy to VM
+name: Build & Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -17,34 +21,76 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache cargo registry and target
+      - name: Cache cargo registry, git, and target
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin/cargo-leptos
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Install cargo-leptos
-        run: cargo install cargo-leptos --locked
+        run: |
+          if ! command -v cargo-leptos &> /dev/null; then
+            cargo install cargo-leptos --locked
+          else
+            echo "cargo-leptos already cached"
+          fi
 
       - name: Build release
         run: cargo leptos build --release
 
-      - name: SCP binary and site to VM
+      - name: Verify build artifacts exist
+        run: |
+          test -f target/release/mason-wheeler-app || (echo "Binary not found!" && exit 1)
+          test -d target/site || (echo "Site directory not found!" && exit 1)
+          ls -lh target/release/mason-wheeler-app
+          du -sh target/site/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-leptos
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Upload binary to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "target/release/mason-wheeler-app,target/site/"
-          target: /home/azureuser/app/_deploy_staging
-          strip_components: 0
+          source: "target/release/mason-wheeler-app"
+          target: /home/azureuser/app/_staging
+          strip_components: 2
 
-      - name: SSH to deploy and restart service
+      - name: Upload site assets to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "target/site/"
+          target: /home/azureuser/app/_staging_site
+          strip_components: 1
+
+      - name: Deploy and restart
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -54,25 +100,62 @@ jobs:
             set -e
             cd /home/azureuser/app
 
-            # Move binary into place
-            cp _deploy_staging/target/release/mason-wheeler-app ./mason-wheeler-app
+            # Backup current binary for rollback
+            if [ -f mason-wheeler-app ]; then
+              cp mason-wheeler-app mason-wheeler-app.bak
+              echo "Backup created: mason-wheeler-app.bak"
+            fi
+
+            # Deploy new binary
+            cp _staging/mason-wheeler-app ./mason-wheeler-app
             chmod +x ./mason-wheeler-app
 
-            # Sync site directory
-            rsync -a --delete _deploy_staging/target/site/ ./site/
+            # Deploy new site assets
+            rsync -a --delete _staging_site/site/ ./site/
 
             # Clean up staging
-            rm -rf _deploy_staging
+            rm -rf _staging _staging_site
 
-            # Restart the service
-            sudo systemctl restart mason-wheeler
+            # Stop old service (Node.js or previous version)
+            sudo systemctl stop mason-wheeler-web.service 2>/dev/null || true
 
-      - name: Verify Key Vault access
+            # Restart the new service
+            sudo systemctl restart mason-wheeler-app.service
+
+            # Wait for startup
+            sleep 3
+
+            # Health check
+            if curl -sf http://127.0.0.1:3000 > /dev/null 2>&1; then
+              echo "Health check PASSED — app is running"
+            else
+              echo "Health check FAILED — rolling back"
+              if [ -f mason-wheeler-app.bak ]; then
+                cp mason-wheeler-app.bak mason-wheeler-app
+                sudo systemctl restart mason-wheeler-app.service
+                sleep 2
+                if curl -sf http://127.0.0.1:3000 > /dev/null 2>&1; then
+                  echo "Rollback successful"
+                else
+                  echo "Rollback also failed — manual intervention needed"
+                fi
+              fi
+              exit 1
+            fi
+
+      - name: Verify SSL and public access
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            set -e
-            az login --identity && az keyvault secret show --vault-name mason-wheeler-kv --name stripe-secret-key --query value -o tsv > /dev/null
+            # Check certbot status for properties subdomain
+            if [ -f /etc/letsencrypt/live/properties.mason-wheeler.com/fullchain.pem ]; then
+              echo "SSL cert exists for properties.mason-wheeler.com"
+            else
+              echo "SSL cert not yet issued — attempting certbot"
+              sudo certbot --nginx -d properties.mason-wheeler.com --non-interactive --agree-tos --email masewheeler@outlook.com 2>&1 || echo "Certbot skipped (DNS may not have propagated)"
+            fi
+
+            echo "Deploy complete at $(date)"

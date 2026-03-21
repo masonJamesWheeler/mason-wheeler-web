@@ -123,8 +123,8 @@ pub fn LoginPage() -> impl IntoView {
                 </div>
                 <p class="text-center text-sm text-slate-500 mt-6">
                     "Need access? Contact your landlord at "
-                    <a href="mailto:mason@mason-wheeler.com" class="text-orange-600 hover:underline">
-                        "mason@mason-wheeler.com"
+                    <a href="mailto:masonwheeler@fieldflow.us" class="text-orange-600 hover:underline">
+                        "masonwheeler@fieldflow.us"
                     </a>
                 </p>
             </div>

@@ -174,18 +174,18 @@ fn seed_default_landlord(conn: &Connection) {
         .unwrap_or(0);
 
     if count == 0 {
-        let password_hash =
-            bcrypt::hash("changeme123", 10).expect("Failed to hash default password");
+        let email = std::env::var("ADMIN_EMAIL")
+            .expect("ADMIN_EMAIL env var required for initial setup");
+        let password = std::env::var("ADMIN_PASSWORD")
+            .expect("ADMIN_PASSWORD env var required for initial setup");
+        let name = std::env::var("ADMIN_NAME")
+            .unwrap_or_else(|_| "Landlord".to_string());
+
+        let password_hash = bcrypt::hash(&password, 10).expect("Failed to hash password");
 
         conn.execute(
             "INSERT INTO users (id, email, password_hash, role, name) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![
-                "landlord-1",
-                "mason@mason-wheeler.com",
-                password_hash,
-                "landlord",
-                "Mason Wheeler",
-            ],
+            rusqlite::params!["landlord-1", email, password_hash, "landlord", name],
         )
         .expect("Failed to seed default landlord user");
     }
@@ -200,15 +200,16 @@ fn seed_default_landlord(conn: &Connection) {
         .unwrap_or(0);
 
     if contact_count == 0 {
+        let name = std::env::var("ADMIN_NAME")
+            .unwrap_or_else(|_| "Landlord".to_string());
+        let email = std::env::var("ADMIN_EMAIL")
+            .unwrap_or_else(|_| "admin@example.com".to_string());
+        let mailing_address = std::env::var("LANDLORD_MAILING_ADDRESS")
+            .unwrap_or_else(|_| "".to_string());
+
         conn.execute(
             "INSERT INTO landlord_contact (id, name, mailing_address, phone, email) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![
-                "main",
-                "Mason Wheeler",
-                "8404 12th Ave S, Seattle, WA 98108",
-                "",
-                "mason@mason-wheeler.com",
-            ],
+            rusqlite::params!["main", name, mailing_address, "", email],
         )
         .expect("Failed to seed landlord contact info");
     }

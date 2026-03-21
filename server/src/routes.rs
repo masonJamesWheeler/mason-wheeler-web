@@ -681,8 +681,8 @@ async fn create_checkout(
 
     let client = stripe::Client::new(&stripe_secret);
 
-    let success_url = "https://mason-wheeler.com/tenant/payments?success=true";
-    let cancel_url = "https://mason-wheeler.com/tenant/payments?cancelled=true";
+    let success_url = "https://properties.mason-wheeler.com/tenant/payments?success=true";
+    let cancel_url = "https://properties.mason-wheeler.com/tenant/payments?cancelled=true";
 
     let mut params = stripe::CreateCheckoutSession::new();
     params.success_url = Some(success_url);
