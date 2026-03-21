@@ -186,6 +186,8 @@ async fn create_checklist(
 
     let checklist_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    // Resolve landlord name before acquiring the db lock to avoid deadlock
+    let ll_name = landlord_name();
     let db = get_db();
 
     db.execute(
@@ -195,7 +197,7 @@ async fn create_checklist(
             checklist_id,
             "8404 12th Ave S, Seattle, WA 98108",
             body.tenant_name,
-            &landlord_name(),
+            &ll_name,
             body.move_in_date,
             now,
         ],
@@ -242,7 +244,7 @@ async fn create_checklist(
         id: checklist_id,
         property_address: "8404 12th Ave S, Seattle, WA 98108".to_string(),
         tenant_name: body.tenant_name,
-        landlord_name: landlord_name(),
+        landlord_name: ll_name,
         move_in_date: body.move_in_date,
         tenant_signed: false,
         landlord_signed: false,

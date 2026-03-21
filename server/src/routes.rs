@@ -42,8 +42,27 @@ fn get_login_attempts() -> &'static Mutex<HashMap<String, (u32, Instant)>> {
 const MAX_LOGIN_ATTEMPTS: u32 = 5;
 const LOGIN_WINDOW_SECS: u64 = 15 * 60; // 15 minutes
 
+const MAX_RATE_LIMIT_ENTRIES: usize = 1000;
+
 fn check_rate_limit(key: &str) -> Result<(), StatusCode> {
-    let attempts = get_login_attempts().lock().unwrap();
+    let mut attempts = get_login_attempts().lock().unwrap();
+
+    // Periodic cleanup: remove entries older than the login window
+    attempts.retain(|_, (_, first_attempt)| first_attempt.elapsed().as_secs() < LOGIN_WINDOW_SECS);
+
+    // Hard cap: if still over the limit, remove the oldest entries
+    if attempts.len() > MAX_RATE_LIMIT_ENTRIES {
+        let mut entries: Vec<(String, Instant)> = attempts
+            .iter()
+            .map(|(k, (_, t))| (k.clone(), *t))
+            .collect();
+        entries.sort_by(|a, b| b.1.cmp(&a.1)); // newest first
+        entries.truncate(MAX_RATE_LIMIT_ENTRIES);
+        let keep: std::collections::HashSet<String> =
+            entries.into_iter().map(|(k, _)| k).collect();
+        attempts.retain(|k, _| keep.contains(k));
+    }
+
     if let Some((count, first_attempt)) = attempts.get(key) {
         if first_attempt.elapsed().as_secs() < LOGIN_WINDOW_SECS && *count >= MAX_LOGIN_ATTEMPTS {
             return Err(StatusCode::TOO_MANY_REQUESTS);
@@ -1109,33 +1128,31 @@ async fn admin_report_maintenance(headers: HeaderMap) -> Result<Json<Maintenance
 
     let db = get_db();
 
-    let total: u32 = db
-        .query_row("SELECT COUNT(*) FROM maintenance_requests", [], |row| row.get(0))
+    let mut stmt = db
+        .prepare("SELECT status, COUNT(*) FROM maintenance_requests GROUP BY status")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let submitted: u32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'submitted'",
-            [],
-            |row| row.get(0),
-        )
+    let mut submitted: u32 = 0;
+    let mut in_progress: u32 = 0;
+    let mut completed: u32 = 0;
+    let mut total: u32 = 0;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let in_progress: u32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'in_progress'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let completed: u32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM maintenance_requests WHERE status = 'completed'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for row in rows {
+        let (status, count) = row.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        total += count;
+        match status.as_str() {
+            "submitted" => submitted = count,
+            "in_progress" => in_progress = count,
+            "completed" => completed = count,
+            _ => {}
+        }
+    }
 
     Ok(Json(MaintenanceStats {
         total,
@@ -1589,16 +1606,18 @@ async fn update_maintenance(
     }
     let now = chrono::Utc::now().to_rfc3339();
 
-    let db = get_db();
-    let rows = db
-        .execute(
-            "UPDATE maintenance_requests SET status = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![body.status, now, id],
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    {
+        let db = get_db();
+        let rows = db
+            .execute(
+                "UPDATE maintenance_requests SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                rusqlite::params![body.status, now, id],
+            )
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if rows == 0 {
-        return Err(StatusCode::NOT_FOUND);
+        if rows == 0 {
+            return Err(StatusCode::NOT_FOUND);
+        }
     }
 
     // Send maintenance update email (non-blocking)
@@ -1929,47 +1948,69 @@ async fn stripe_webhook(
             let payment_id = Uuid::new_v4().to_string();
             let now = chrono::Utc::now().to_rfc3339();
 
-            let db = get_db();
-            let result = db.execute(
-                "INSERT INTO payments (id, user_id, amount, payment_type, description, stripe_payment_id, status, paid_date, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'completed', ?7, ?7)",
-                rusqlite::params![
-                    payment_id,
-                    user_id,
-                    amount,
-                    "stripe",
-                    description,
-                    stripe_payment_id,
-                    now,
-                ],
-            );
-
-            if let Err(e) = result {
-                tracing::error!("Failed to record payment from webhook: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-
-            // If this payment is for a utility charge, mark it as paid
+            // If this payment is for a utility charge, extract the id before scoping the db lock
             let utility_charge_id = session
                 .metadata
                 .as_ref()
                 .and_then(|m| m.get("utility_charge_id").cloned());
 
-            if let Some(ref charge_id) = utility_charge_id {
-                let result = db.execute(
-                    "UPDATE utility_charges SET paid = 1, payment_id = ?1 WHERE id = ?2",
-                    rusqlite::params![payment_id, charge_id],
-                );
-                if let Err(e) = result {
-                    tracing::error!("Failed to mark utility charge {} as paid: {}", charge_id, e);
-                } else {
-                    tracing::info!(
-                        utility_charge_id = %charge_id,
-                        payment_id = %payment_id,
-                        "Utility charge marked as paid"
-                    );
+            {
+                let db = get_db();
+
+                // Idempotency: skip if a payment with this stripe_payment_id already exists
+                if let Some(ref spid) = stripe_payment_id {
+                    let exists: bool = db
+                        .query_row(
+                            "SELECT COUNT(*) FROM payments WHERE stripe_payment_id = ?1",
+                            rusqlite::params![spid],
+                            |row| row.get::<_, u32>(0),
+                        )
+                        .map(|c| c > 0)
+                        .unwrap_or(false);
+                    if exists {
+                        tracing::info!(
+                            stripe_payment_id = %spid,
+                            "Duplicate webhook event — payment already recorded, skipping"
+                        );
+                        return Ok(Json(serde_json::json!({ "received": true })));
+                    }
                 }
-            }
+
+                let result = db.execute(
+                    "INSERT INTO payments (id, user_id, amount, payment_type, description, stripe_payment_id, status, paid_date, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'completed', ?7, ?7)",
+                    rusqlite::params![
+                        payment_id,
+                        user_id,
+                        amount,
+                        "stripe",
+                        description,
+                        stripe_payment_id,
+                        now,
+                    ],
+                );
+
+                if let Err(e) = result {
+                    tracing::error!("Failed to record payment from webhook: {}", e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+
+                if let Some(ref charge_id) = utility_charge_id {
+                    let result = db.execute(
+                        "UPDATE utility_charges SET paid = 1, payment_id = ?1 WHERE id = ?2",
+                        rusqlite::params![payment_id, charge_id],
+                    );
+                    if let Err(e) = result {
+                        tracing::error!("Failed to mark utility charge {} as paid: {}", charge_id, e);
+                    } else {
+                        tracing::info!(
+                            utility_charge_id = %charge_id,
+                            payment_id = %payment_id,
+                            "Utility charge marked as paid"
+                        );
+                    }
+                }
+            } // db lock dropped here
 
             tracing::info!(
                 payment_id = %payment_id,

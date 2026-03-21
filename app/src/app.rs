@@ -4,6 +4,7 @@ use leptos_router::{components::*, path};
 
 use crate::components::header::Header;
 use crate::components::footer::Footer;
+use crate::components::authenticated_layout::AuthenticatedLayout;
 use crate::pages;
 
 pub fn shell(options: leptos::config::LeptosOptions) -> impl IntoView {
@@ -26,6 +27,30 @@ pub fn shell(options: leptos::config::LeptosOptions) -> impl IntoView {
     }
 }
 
+/// Public page wrapper — no auth context
+#[component]
+fn PublicLayout(children: Children) -> impl IntoView {
+    let content = children();
+    view! {
+        <Header />
+        <main class="flex-1">
+            {content}
+        </main>
+        <Footer />
+    }
+}
+
+/// Protected page wrapper — auth context provided, header shows nav
+#[component]
+fn ProtectedLayout(children: Children) -> impl IntoView {
+    let content = children();
+    view! {
+        <AuthenticatedLayout>
+            {content}
+        </AuthenticatedLayout>
+    }
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
@@ -35,26 +60,37 @@ pub fn App() -> impl IntoView {
         <Title text="8404 12th Ave S | Seattle Rental" />
 
         <Router>
-            <Header />
-            <main class="flex-1">
-                <Routes fallback=|| view! { <p class="p-8 text-center">"Page not found."</p> }>
-                    <Route path=path!("/") view=pages::home::HomePage />
-                    <Route path=path!("/login") view=pages::login::LoginPage />
-                    <Route path=path!("/forgot-password") view=pages::forgot_password::ForgotPasswordPage />
-                    <Route path=path!("/reset-password") view=pages::reset_password::ResetPasswordPage />
-                    <Route path=path!("/tenant") view=pages::tenant::dashboard::TenantDashboard />
-                    <Route path=path!("/tenant/payments") view=pages::tenant::payments::TenantPayments />
-                    <Route path=path!("/tenant/documents") view=pages::tenant::documents::TenantDocuments />
-                    <Route path=path!("/tenant/maintenance") view=pages::tenant::maintenance::TenantMaintenance />
-                    <Route path=path!("/admin") view=pages::admin::dashboard::AdminDashboard />
-                    <Route path=path!("/admin/payments") view=pages::admin::payments::AdminPayments />
-                    <Route path=path!("/admin/documents") view=pages::admin::documents::AdminDocuments />
-                    <Route path=path!("/admin/maintenance") view=pages::admin::maintenance::AdminMaintenance />
-                    <Route path=path!("/admin/tenants") view=pages::admin::tenants::AdminTenants />
-                    <Route path=path!("/admin/reports") view=pages::admin::reports::AdminReports />
-                </Routes>
-            </main>
-            <Footer />
+            <Routes fallback=|| view! {
+                <PublicLayout>
+                    <div class="flex items-center justify-center min-h-[60vh]">
+                        <div class="text-center">
+                            <h1 class="text-2xl font-semibold text-stone-900 mb-2">"Page not found"</h1>
+                            <p class="text-stone-500 mb-6">"The page you're looking for doesn't exist."</p>
+                            <a href="/" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-stone-900 text-white hover:bg-stone-800 transition-colors">"Go home"</a>
+                        </div>
+                    </div>
+                </PublicLayout>
+            }>
+                // Public routes — no auth required
+                <Route path=path!("/") view=|| view! { <PublicLayout><pages::home::HomePage /></PublicLayout> } />
+                <Route path=path!("/login") view=|| view! { <PublicLayout><pages::login::LoginPage /></PublicLayout> } />
+                <Route path=path!("/forgot-password") view=|| view! { <PublicLayout><pages::forgot_password::ForgotPasswordPage /></PublicLayout> } />
+                <Route path=path!("/reset-password") view=|| view! { <PublicLayout><pages::reset_password::ResetPasswordPage /></PublicLayout> } />
+
+                // Tenant routes — auth required
+                <Route path=path!("/tenant") view=|| view! { <ProtectedLayout><pages::tenant::dashboard::TenantDashboard /></ProtectedLayout> } />
+                <Route path=path!("/tenant/payments") view=|| view! { <ProtectedLayout><pages::tenant::payments::TenantPayments /></ProtectedLayout> } />
+                <Route path=path!("/tenant/documents") view=|| view! { <ProtectedLayout><pages::tenant::documents::TenantDocuments /></ProtectedLayout> } />
+                <Route path=path!("/tenant/maintenance") view=|| view! { <ProtectedLayout><pages::tenant::maintenance::TenantMaintenance /></ProtectedLayout> } />
+
+                // Admin routes — auth required
+                <Route path=path!("/admin") view=|| view! { <ProtectedLayout><pages::admin::dashboard::AdminDashboard /></ProtectedLayout> } />
+                <Route path=path!("/admin/payments") view=|| view! { <ProtectedLayout><pages::admin::payments::AdminPayments /></ProtectedLayout> } />
+                <Route path=path!("/admin/documents") view=|| view! { <ProtectedLayout><pages::admin::documents::AdminDocuments /></ProtectedLayout> } />
+                <Route path=path!("/admin/maintenance") view=|| view! { <ProtectedLayout><pages::admin::maintenance::AdminMaintenance /></ProtectedLayout> } />
+                <Route path=path!("/admin/tenants") view=|| view! { <ProtectedLayout><pages::admin::tenants::AdminTenants /></ProtectedLayout> } />
+                <Route path=path!("/admin/reports") view=|| view! { <ProtectedLayout><pages::admin::reports::AdminReports /></ProtectedLayout> } />
+            </Routes>
         </Router>
     }
 }
