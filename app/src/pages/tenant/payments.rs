@@ -218,7 +218,7 @@ pub fn TenantPayments() -> impl IntoView {
                                     let badge_class = match status {
                                         mason_wheeler_shared::PaymentStatus::Completed => "badge badge-success",
                                         mason_wheeler_shared::PaymentStatus::Pending => "badge badge-warning",
-                                        _ => "badge badge-error",
+                                        mason_wheeler_shared::PaymentStatus::Failed => "badge badge-error",
                                     };
                                     view! {
                                         <tr class="border-b border-stone-200/60 last:border-0 hover:bg-stone-50/50 transition-colors duration-150">

@@ -128,6 +128,7 @@ pub fn create_session(user_id: &str) -> String {
     session_id
 }
 
+#[allow(dead_code)]
 pub fn validate_session(session_id: &str) -> Option<(String, String, String, String)> {
     let db = get_db();
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();

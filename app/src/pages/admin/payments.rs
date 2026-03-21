@@ -236,7 +236,7 @@ pub fn AdminPayments() -> impl IntoView {
                                     let badge_class = match status {
                                         mason_wheeler_shared::PaymentStatus::Completed => "badge-success",
                                         mason_wheeler_shared::PaymentStatus::Pending => "badge-warning",
-                                        _ => "badge-error",
+                                        mason_wheeler_shared::PaymentStatus::Failed => "badge-error",
                                     };
                                     view! {
                                         <tr class="border-b border-stone-200/60 last:border-0 hover:bg-stone-50/50 transition-colors">

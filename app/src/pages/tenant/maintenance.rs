@@ -1,6 +1,6 @@
 #![allow(unused)]
 use leptos::prelude::*;
-use mason_wheeler_shared::{MaintenanceMessage, MaintenanceRequest};
+use mason_wheeler_shared::{MaintenanceMessage, MaintenanceRequest, MaintenanceStatus};
 
 #[allow(unused)]
 #[component]
@@ -234,11 +234,15 @@ pub fn TenantMaintenance() -> impl IntoView {
                             let id_toggle = id.clone();
                             let id_send = id.clone();
                             let badge_class = match status {
-                                mason_wheeler_shared::MaintenanceStatus::Submitted => "badge-warning",
-                                mason_wheeler_shared::MaintenanceStatus::InProgress => "badge-info",
-                                mason_wheeler_shared::MaintenanceStatus::Completed => "badge-success",
+                                MaintenanceStatus::Submitted => "badge-warning",
+                                MaintenanceStatus::InProgress => "badge-info",
+                                MaintenanceStatus::Completed => "badge-success",
                             };
-                            let status_label = status.to_string().replace('_', " ");
+                            let status_label = match status {
+                                MaintenanceStatus::Submitted => "Submitted",
+                                MaintenanceStatus::InProgress => "In Progress",
+                                MaintenanceStatus::Completed => "Completed",
+                            }.to_string();
                             let is_expanded = expanded_id.get().as_deref() == Some(&id);
                             view! {
                                 <div class="card card-hover">

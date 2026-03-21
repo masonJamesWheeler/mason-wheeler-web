@@ -2445,7 +2445,7 @@ async fn admin_delete_applicant(
 async fn tenant_get_lease(
     headers: HeaderMap,
 ) -> Result<Json<Option<mason_wheeler_shared::LeaseAgreement>>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     let db = crate::db::get_db();
 
     let lease = db
@@ -2481,7 +2481,7 @@ async fn tenant_sign_lease(
     headers: HeaderMap,
     Json(body): Json<mason_wheeler_shared::SignLeaseRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
     let db = crate::db::get_db();
 
     // Verify the lease belongs to this tenant and is in a signable state
@@ -2661,7 +2661,7 @@ async fn pdf_lease(
     headers: HeaderMap,
     axum::extract::Path(lease_id): axum::extract::Path<String>,
 ) -> Result<(HeaderMap, Vec<u8>), StatusCode> {
-    let user = extract_user(&headers)?;
+    let user = require_auth(&headers)?;
 
     let db = crate::db::get_db();
     let lease: mason_wheeler_shared::LeaseAgreement = db

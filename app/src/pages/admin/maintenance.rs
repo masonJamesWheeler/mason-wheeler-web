@@ -1,6 +1,6 @@
 #![allow(unused)]
 use leptos::prelude::*;
-use mason_wheeler_shared::{MaintenanceMessage, MaintenanceRequest, PaginatedResponse};
+use mason_wheeler_shared::{MaintenanceMessage, MaintenanceRequest, MaintenanceStatus, PaginatedResponse};
 
 #[allow(unused)]
 #[component]
@@ -200,13 +200,17 @@ pub fn AdminMaintenance() -> impl IntoView {
                             let id_send = id.clone();
 
                             let badge_class = match &status {
-                                mason_wheeler_shared::MaintenanceStatus::Submitted => "badge-warning",
-                                mason_wheeler_shared::MaintenanceStatus::InProgress => "badge-info",
-                                mason_wheeler_shared::MaintenanceStatus::Completed => "badge-success",
+                                MaintenanceStatus::Submitted => "badge-warning",
+                                MaintenanceStatus::InProgress => "badge-info",
+                                MaintenanceStatus::Completed => "badge-success",
                             };
 
                             let is_expanded = expanded_id.get().as_deref() == Some(&id);
-                            let status_label = status.to_string().replace('_', " ");
+                            let status_label = match status {
+                                MaintenanceStatus::Submitted => "Submitted",
+                                MaintenanceStatus::InProgress => "In Progress",
+                                MaintenanceStatus::Completed => "Completed",
+                            }.to_string();
 
                             view! {
                                 <div class="card">
