@@ -108,9 +108,9 @@ pub fn Header() -> impl IntoView {
                             </div>
                         </Show>
 
-                        // Public: show sign-in button
+                        // Public: show sign-in link (subtle, doesn't compete with page CTAs)
                         <Show when=move || !is_logged_in.get()>
-                            <A href="/login" attr:class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-stone-900 text-white hover:bg-stone-800 transition-colors">
+                            <A href="/login" attr:class="text-sm font-medium text-stone-600 hover:text-stone-900 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                                 "Sign in"
                             </A>
                         </Show>
