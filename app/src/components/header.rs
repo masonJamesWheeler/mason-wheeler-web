@@ -21,7 +21,7 @@ pub fn Header() -> impl IntoView {
     let is_landlord = Signal::derive(move || {
         auth_user
             .and_then(|u| u.get())
-            .map(|u| u.role == "landlord")
+            .map(|u| u.role == mason_wheeler_shared::UserRole::Landlord)
             .unwrap_or(false)
     });
 
@@ -69,7 +69,6 @@ pub fn Header() -> impl IntoView {
                         <span class="hidden sm:block text-sm font-semibold text-stone-900">"8404 12th Ave S"</span>
                     </A>
 
-                    // Desktop nav
                     <div class="hidden md:flex md:items-center md:space-x-1">
                         <Show when=move || is_logged_in.get()>
                             <A href={move || base_path.get()} attr:class=nav_link>"Dashboard"</A>

@@ -228,13 +228,14 @@ pub fn AdminPayments() -> impl IntoView {
                             <tbody>
                                 {move || payments.get().iter().map(|p| {
                                     let date = p.paid_date.clone().or(p.due_date.clone()).unwrap_or_default();
-                                    let ptype = p.payment_type.clone();
+                                    let ptype = p.payment_type.to_string();
                                     let desc = p.description.clone().unwrap_or_default();
                                     let amount = p.amount;
                                     let status = p.status.clone();
-                                    let badge_class = match status.as_str() {
-                                        "completed" => "badge-success",
-                                        "pending" => "badge-warning",
+                                    let status_str = status.to_string();
+                                    let badge_class = match status {
+                                        mason_wheeler_shared::PaymentStatus::Completed => "badge-success",
+                                        mason_wheeler_shared::PaymentStatus::Pending => "badge-warning",
                                         _ => "badge-error",
                                     };
                                     view! {
@@ -245,7 +246,7 @@ pub fn AdminPayments() -> impl IntoView {
                                             <td class="px-5 py-3.5 text-right font-semibold text-stone-900">{format!("${:.2}", amount)}</td>
                                             <td class="px-5 py-3.5 text-right">
                                                 <span class={format!("capitalize {}", badge_class)}>
-                                                    {status}
+                                                    {status_str}
                                                 </span>
                                             </td>
                                         </tr>

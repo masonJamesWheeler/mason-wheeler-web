@@ -263,8 +263,8 @@ async fn sign_checklist(
     let db = get_db();
 
     let column = match body.role.as_str() {
-        "tenant" if user.role == "tenant" => "tenant_signed",
-        "landlord" if user.role == "landlord" => "landlord_signed",
+        "tenant" if user.role == UserRole::Tenant => "tenant_signed",
+        "landlord" if user.role == UserRole::Landlord => "landlord_signed",
         _ => return Err(StatusCode::FORBIDDEN),
     };
 
@@ -336,7 +336,7 @@ async fn create_lead_paint(
 
 async fn acknowledge_lead_paint(headers: HeaderMap) -> Result<Json<serde_json::Value>, StatusCode> {
     let user = require_auth(&headers)?;
-    if user.role != "tenant" {
+    if user.role != UserRole::Tenant {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -415,16 +415,19 @@ async fn get_deposit_receipt(headers: HeaderMap) -> Result<Json<Option<DepositRe
         "SELECT tenant_name, property_address, deposit_amount, deposit_type, depository_name, depository_address, date_received, landlord_name
          FROM deposit_receipts ORDER BY created_at DESC LIMIT 1",
         [],
-        |row| Ok(DepositReceipt {
-            tenant_name: row.get(0)?,
-            property_address: row.get(1)?,
-            deposit_amount: row.get(2)?,
-            deposit_type: row.get(3)?,
-            depository_name: row.get(4)?,
-            depository_address: row.get(5)?,
-            date_received: row.get(6)?,
-            landlord_name: row.get(7)?,
-        }),
+        |row| {
+            let deposit_type_str: String = row.get(3)?;
+            Ok(DepositReceipt {
+                tenant_name: row.get(0)?,
+                property_address: row.get(1)?,
+                deposit_amount: row.get(2)?,
+                deposit_type: crate::routes::parse_enum(&deposit_type_str, DepositType::Security),
+                depository_name: row.get(4)?,
+                depository_address: row.get(5)?,
+                date_received: row.get(6)?,
+                landlord_name: row.get(7)?,
+            })
+        },
     );
 
     match result {
@@ -443,12 +446,13 @@ async fn create_deposit_receipt(
     let now = chrono::Utc::now().to_rfc3339();
     let db = get_db();
 
+    let deposit_type_str = body.deposit_type.to_string();
     db.execute(
         "INSERT INTO deposit_receipts (id, tenant_name, property_address, deposit_amount, deposit_type, depository_name, depository_address, date_received, landlord_name, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         rusqlite::params![
             id, body.tenant_name, body.property_address, body.deposit_amount,
-            body.deposit_type, body.depository_name, body.depository_address,
+            deposit_type_str, body.depository_name, body.depository_address,
             body.date_received, body.landlord_name, now,
         ],
     ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

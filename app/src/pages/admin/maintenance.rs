@@ -78,26 +78,19 @@ pub fn AdminMaintenance() -> impl IntoView {
         if t == 0 { 1 } else { (t + per_page - 1) / per_page }
     };
 
-    let update_status = move |id: String, new_status: String| {
+    let update_status = move |id: String, new_status: mason_wheeler_shared::MaintenanceStatus| {
         #[cfg(feature = "hydrate")]
         {
             let id_clone = id.clone();
             let status_clone = new_status.clone();
             leptos::task::spawn_local(async move {
                 let body = serde_json::json!({ "status": status_clone });
-                if let Ok(resp) = gloo_net::http::Request::patch(&format!("/api/maintenance/{}", id_clone))
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        set_requests.update(|reqs| {
-                            if let Some(req) = reqs.iter_mut().find(|r| r.id == id) {
-                                req.status = new_status.clone();
-                            }
-                        });
-                    }
+                if crate::api::client::api_patch::<serde_json::Value>(&format!("/api/maintenance/{}", id_clone), &body).await.is_ok() {
+                    set_requests.update(|reqs| {
+                        if let Some(req) = reqs.iter_mut().find(|r| r.id == id) {
+                            req.status = new_status.clone();
+                        }
+                    });
                 }
             });
         }
@@ -116,13 +109,8 @@ pub fn AdminMaintenance() -> impl IntoView {
             {
                 let id_clone = id.clone();
                 leptos::task::spawn_local(async move {
-                    if let Ok(resp) = gloo_net::http::Request::get(&format!("/api/maintenance/{}/messages", id_clone))
-                        .send()
-                        .await
-                    {
-                        if let Ok(data) = resp.json::<Vec<MaintenanceMessage>>().await {
-                            set_messages.set(data);
-                        }
+                    if let Ok(data) = crate::api::client::api_get::<Vec<MaintenanceMessage>>(&format!("/api/maintenance/{}/messages", id_clone)).await {
+                        set_messages.set(data);
                     }
                 });
             }
@@ -142,18 +130,9 @@ pub fn AdminMaintenance() -> impl IntoView {
             let req_id = request_id.clone();
             leptos::task::spawn_local(async move {
                 let body = serde_json::json!({ "message": msg_val });
-                if let Ok(resp) = gloo_net::http::Request::post(&format!("/api/maintenance/{}/messages", req_id))
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        if let Ok(msg) = resp.json::<MaintenanceMessage>().await {
-                            set_messages.update(|m| m.push(msg));
-                        }
-                        set_new_message.set(String::new());
-                    }
+                if let Ok(msg) = crate::api::client::api_post::<MaintenanceMessage>(&format!("/api/maintenance/{}/messages", req_id), &body).await {
+                    set_messages.update(|m| m.push(msg));
+                    set_new_message.set(String::new());
                 }
                 set_sending_message.set(false);
             });
@@ -220,14 +199,14 @@ pub fn AdminMaintenance() -> impl IntoView {
                             let id_toggle = id.clone();
                             let id_send = id.clone();
 
-                            let badge_class = match status.as_str() {
-                                "submitted" => "badge-warning",
-                                "in_progress" => "badge-info",
-                                "completed" => "badge-success",
-                                _ => "badge-neutral",
+                            let badge_class = match &status {
+                                mason_wheeler_shared::MaintenanceStatus::Submitted => "badge-warning",
+                                mason_wheeler_shared::MaintenanceStatus::InProgress => "badge-info",
+                                mason_wheeler_shared::MaintenanceStatus::Completed => "badge-success",
                             };
 
                             let is_expanded = expanded_id.get().as_deref() == Some(&id);
+                            let status_label = status.to_string().replace('_', " ");
 
                             view! {
                                 <div class="card">
@@ -240,19 +219,19 @@ pub fn AdminMaintenance() -> impl IntoView {
                                             </p>
                                         </div>
                                         <span class={format!("capitalize ml-4 shrink-0 {}", badge_class)}>
-                                            {status.replace('_', " ")}
+                                            {status_label}
                                         </span>
                                     </div>
                                     <div class="flex gap-2 pt-3 border-t border-stone-200/60">
                                         <button
                                             class="btn-secondary text-sm"
-                                            on:click=move |_| update_status(id_progress.clone(), "in_progress".to_string())
+                                            on:click=move |_| update_status(id_progress.clone(), mason_wheeler_shared::MaintenanceStatus::InProgress)
                                         >
                                             "Mark In Progress"
                                         </button>
                                         <button
                                             class="btn-accent text-sm"
-                                            on:click=move |_| update_status(id_complete.clone(), "completed".to_string())
+                                            on:click=move |_| update_status(id_complete.clone(), mason_wheeler_shared::MaintenanceStatus::Completed)
                                         >
                                             "Mark Completed"
                                         </button>

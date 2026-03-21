@@ -13,10 +13,8 @@ pub fn AdminApplicants() -> impl IntoView {
         let set_applicants = set_applicants.clone();
         let set_loading = set_loading.clone();
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/admin/applicants").send().await {
-                if let Ok(data) = resp.json::<Vec<Applicant>>().await {
-                    set_applicants.set(data);
-                }
+            if let Ok(data) = crate::api::client::api_get::<Vec<Applicant>>("/api/admin/applicants").await {
+                set_applicants.set(data);
             }
             set_loading.set(false);
         });
@@ -38,19 +36,13 @@ pub fn AdminApplicants() -> impl IntoView {
             let set_applicants = set_applicants.clone();
             leptos::task::spawn_local(async move {
                 let body = serde_json::json!({"status": new_status});
-                if let Ok(resp) = gloo_net::http::Request::patch(&format!("/api/admin/applicants/{}", id))
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        set_applicants.update(|apps| {
-                            if let Some(app) = apps.iter_mut().find(|a| a.id == id) {
-                                app.status = new_status.clone();
-                            }
-                        });
-                    }
+                if crate::api::client::api_patch::<serde_json::Value>(&format!("/api/admin/applicants/{}", id), &body).await.is_ok() {
+                    let parsed_status: mason_wheeler_shared::ApplicantStatus = serde_json::from_str(&format!("\"{}\"", new_status)).unwrap_or(mason_wheeler_shared::ApplicantStatus::New);
+                    set_applicants.update(|apps| {
+                        if let Some(app) = apps.iter_mut().find(|a| a.id == id) {
+                            app.status = parsed_status.clone();
+                        }
+                    });
                 }
             });
         }
@@ -62,19 +54,12 @@ pub fn AdminApplicants() -> impl IntoView {
             let set_applicants = set_applicants.clone();
             leptos::task::spawn_local(async move {
                 let body = serde_json::json!({"notes": notes});
-                if let Ok(resp) = gloo_net::http::Request::patch(&format!("/api/admin/applicants/{}", id))
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        set_applicants.update(|apps| {
-                            if let Some(app) = apps.iter_mut().find(|a| a.id == id) {
-                                app.notes = Some(notes.clone());
-                            }
-                        });
-                    }
+                if crate::api::client::api_patch::<serde_json::Value>(&format!("/api/admin/applicants/{}", id), &body).await.is_ok() {
+                    set_applicants.update(|apps| {
+                        if let Some(app) = apps.iter_mut().find(|a| a.id == id) {
+                            app.notes = Some(notes.clone());
+                        }
+                    });
                 }
             });
         }
@@ -85,13 +70,8 @@ pub fn AdminApplicants() -> impl IntoView {
         {
             let set_applicants = set_applicants.clone();
             leptos::task::spawn_local(async move {
-                if let Ok(resp) = gloo_net::http::Request::delete(&format!("/api/admin/applicants/{}", id))
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        set_applicants.update(|apps| apps.retain(|a| a.id != id));
-                    }
+                if crate::api::client::api_delete(&format!("/api/admin/applicants/{}", id)).await.is_ok() {
+                    set_applicants.update(|apps| apps.retain(|a| a.id != id));
                 }
             });
         }
@@ -123,7 +103,6 @@ pub fn AdminApplicants() -> impl IntoView {
 
             <Show when=move || !loading.get() && !applicants.get().is_empty()>
                 <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
-                    // Table header
                     <div class="hidden sm:grid sm:grid-cols-12 gap-4 px-6 py-3 bg-stone-50 border-b border-stone-200 text-xs font-medium uppercase tracking-wider text-stone-500">
                         <div class="col-span-2">"Name"</div>
                         <div class="col-span-3">"Email"</div>
@@ -152,13 +131,12 @@ pub fn AdminApplicants() -> impl IntoView {
 
                             let status_badge = {
                                 let s = app.status.clone();
-                                let (bg, text) = match s.as_str() {
-                                    "new" => ("bg-blue-100 text-blue-700", "New"),
-                                    "screening" => ("bg-yellow-100 text-yellow-700", "Screening"),
-                                    "approved" => ("bg-green-100 text-green-700", "Approved"),
-                                    "denied" => ("bg-red-100 text-red-700", "Denied"),
-                                    "lease_signed" => ("bg-green-100 text-green-700", "Lease Signed"),
-                                    _ => ("bg-stone-100 text-stone-700", "Unknown"),
+                                let (bg, text) = match s {
+                                    mason_wheeler_shared::ApplicantStatus::New => ("bg-blue-100 text-blue-700", "New"),
+                                    mason_wheeler_shared::ApplicantStatus::Screening => ("bg-yellow-100 text-yellow-700", "Screening"),
+                                    mason_wheeler_shared::ApplicantStatus::Approved => ("bg-green-100 text-green-700", "Approved"),
+                                    mason_wheeler_shared::ApplicantStatus::Denied => ("bg-red-100 text-red-700", "Denied"),
+                                    mason_wheeler_shared::ApplicantStatus::LeaseSigned => ("bg-green-100 text-green-700", "Lease Signed"),
                                 };
                                 view! {
                                     <span class=format!("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {bg} {text}")>
@@ -177,7 +155,6 @@ pub fn AdminApplicants() -> impl IntoView {
 
                             view! {
                                 <div class="border-b border-stone-100 last:border-b-0">
-                                    // Row
                                     <div
                                         class="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 px-6 py-4 cursor-pointer hover:bg-stone-50 transition-colors"
                                         on:click={
@@ -193,7 +170,6 @@ pub fn AdminApplicants() -> impl IntoView {
                                         <div class="sm:col-span-2 text-sm text-stone-400">{created_display}</div>
                                     </div>
 
-                                    // Expanded detail panel
                                     <Show when=move || is_expanded.get()>
                                         {
                                             let app_message_display = app_message.clone();
@@ -209,7 +185,6 @@ pub fn AdminApplicants() -> impl IntoView {
                                             let app_notes = app_notes.clone();
                                             view! {
                                         <div class="border-t border-stone-100 bg-stone-50 px-6 py-5 space-y-4">
-                                            // Message
                                             <Show when={
                                                 move || !app_message_check.is_empty()
                                             }>
@@ -219,7 +194,6 @@ pub fn AdminApplicants() -> impl IntoView {
                                                 </div>
                                             </Show>
 
-                                            // Status dropdown
                                             <div>
                                                 <label class="text-xs font-medium uppercase tracking-wider text-stone-400 mb-1 block">"Status"</label>
                                                 <select
@@ -232,15 +206,14 @@ pub fn AdminApplicants() -> impl IntoView {
                                                         }
                                                     }
                                                 >
-                                                    <option value="new" selected=move || app_status == "new">"New"</option>
-                                                    <option value="screening" selected=move || app_status_1 == "screening">"Screening"</option>
-                                                    <option value="approved" selected=move || app_status_2 == "approved">"Approved"</option>
-                                                    <option value="denied" selected=move || app_status_3 == "denied">"Denied"</option>
-                                                    <option value="lease_signed" selected=move || app_status_4 == "lease_signed">"Lease Signed"</option>
+                                                    <option value="new" selected=move || app_status == mason_wheeler_shared::ApplicantStatus::New>"New"</option>
+                                                    <option value="screening" selected=move || app_status_1 == mason_wheeler_shared::ApplicantStatus::Screening>"Screening"</option>
+                                                    <option value="approved" selected=move || app_status_2 == mason_wheeler_shared::ApplicantStatus::Approved>"Approved"</option>
+                                                    <option value="denied" selected=move || app_status_3 == mason_wheeler_shared::ApplicantStatus::Denied>"Denied"</option>
+                                                    <option value="lease_signed" selected=move || app_status_4 == mason_wheeler_shared::ApplicantStatus::LeaseSigned>"Lease Signed"</option>
                                                 </select>
                                             </div>
 
-                                            // Notes
                                             <div>
                                                 <label class="text-xs font-medium uppercase tracking-wider text-stone-400 mb-1 block">"Notes"</label>
                                                 {
@@ -263,7 +236,6 @@ pub fn AdminApplicants() -> impl IntoView {
                                                 }
                                             </div>
 
-                                            // Action buttons
                                             <div class="flex items-center gap-3 pt-2">
                                                 <a
                                                     href="https://rentals-secure.mysmartmove.com"

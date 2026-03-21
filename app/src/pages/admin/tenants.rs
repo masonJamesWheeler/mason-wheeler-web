@@ -16,10 +16,8 @@ pub fn AdminTenants() -> impl IntoView {
     {
         let set_tenants = set_tenants.clone();
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/admin/tenants").send().await {
-                if let Ok(data) = resp.json::<Vec<TenantUser>>().await {
-                    set_tenants.set(data);
-                }
+            if let Ok(data) = crate::api::client::api_get::<Vec<TenantUser>>("/api/admin/tenants").await {
+                set_tenants.set(data);
             }
         });
     }
@@ -41,21 +39,12 @@ pub fn AdminTenants() -> impl IntoView {
                     "password": password,
                 });
 
-                if let Ok(resp) = gloo_net::http::Request::post("/api/admin/tenants")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
-                    if resp.ok() {
-                        if let Ok(tenant) = resp.json::<TenantUser>().await {
-                            set_tenants.update(|t| t.insert(0, tenant));
-                        }
-                        set_show_form.set(false);
-                        set_tenant_name.set(String::new());
-                        set_tenant_email.set(String::new());
-                        set_tenant_password.set(String::new());
-                    }
+                if let Ok(tenant) = crate::api::client::api_post::<TenantUser>("/api/admin/tenants", &body).await {
+                    set_tenants.update(|t| t.insert(0, tenant));
+                    set_show_form.set(false);
+                    set_tenant_name.set(String::new());
+                    set_tenant_email.set(String::new());
+                    set_tenant_password.set(String::new());
                 }
                 set_submitting.set(false);
             });
@@ -67,10 +56,8 @@ pub fn AdminTenants() -> impl IntoView {
         {
             leptos::task::spawn_local(async move {
                 let url = format!("/api/admin/tenants/{}", id);
-                if let Ok(resp) = gloo_net::http::Request::delete(&url).send().await {
-                    if resp.ok() {
-                        set_tenants.update(|t| t.retain(|tenant| tenant.id != id));
-                    }
+                if crate::api::client::api_delete(&url).await.is_ok() {
+                    set_tenants.update(|t| t.retain(|tenant| tenant.id != id));
                 }
             });
         }

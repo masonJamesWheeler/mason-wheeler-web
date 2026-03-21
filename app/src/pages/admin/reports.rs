@@ -9,10 +9,8 @@ pub fn AdminReports() -> impl IntoView {
     #[cfg(feature = "hydrate")]
     {
         leptos::task::spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/api/admin/reports/overview").send().await {
-                if let Ok(d) = resp.json::<OverviewReport>().await {
-                    set_data.set(Some(d));
-                }
+            if let Ok(d) = crate::api::client::api_get::<OverviewReport>("/api/admin/reports/overview").await {
+                set_data.set(Some(d));
             }
         });
     }

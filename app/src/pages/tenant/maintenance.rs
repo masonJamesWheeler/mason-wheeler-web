@@ -233,13 +233,12 @@ pub fn TenantMaintenance() -> impl IntoView {
                             let date = req.created_at.clone();
                             let id_toggle = id.clone();
                             let id_send = id.clone();
-                            let badge_class = match status.as_str() {
-                                "submitted" => "badge-warning",
-                                "in_progress" => "badge-info",
-                                "completed" => "badge-success",
-                                _ => "badge-info",
+                            let badge_class = match status {
+                                mason_wheeler_shared::MaintenanceStatus::Submitted => "badge-warning",
+                                mason_wheeler_shared::MaintenanceStatus::InProgress => "badge-info",
+                                mason_wheeler_shared::MaintenanceStatus::Completed => "badge-success",
                             };
-                            let status_label = status.replace('_', " ");
+                            let status_label = status.to_string().replace('_', " ");
                             let is_expanded = expanded_id.get().as_deref() == Some(&id);
                             view! {
                                 <div class="card card-hover">

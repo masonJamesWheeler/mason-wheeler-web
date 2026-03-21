@@ -199,6 +199,24 @@ fn create_tables(conn: &Connection) {
             created_at TEXT DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS leases (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL REFERENCES users(id),
+            document_id TEXT REFERENCES documents(id),
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'signed_by_tenant', 'executed', 'expired')),
+            rent_amount REAL NOT NULL DEFAULT 3250.0,
+            lease_start TEXT,
+            lease_end TEXT,
+            tenant_signed_name TEXT,
+            tenant_signed_at TEXT,
+            tenant_signed_ip TEXT,
+            landlord_signed_name TEXT,
+            landlord_signed_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_leases_tenant ON leases(tenant_id);
+        CREATE INDEX IF NOT EXISTS idx_leases_status ON leases(status);
         CREATE INDEX IF NOT EXISTS idx_payments_stripe_id ON payments(stripe_payment_id);
         CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token);
         CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);

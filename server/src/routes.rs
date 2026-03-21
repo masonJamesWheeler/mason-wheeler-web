@@ -150,8 +150,13 @@ fn is_valid_date(date: &str) -> bool {
 pub struct AuthUser {
     pub id: String,
     pub email: String,
-    pub role: String,
+    pub role: UserRole,
     pub name: String,
+}
+
+/// Parse a string from the database into a typed enum, falling back to a default.
+pub fn parse_enum<T: serde::de::DeserializeOwned>(s: &str, default: T) -> T {
+    serde_json::from_str(&format!("\"{}\"", s)).unwrap_or(default)
 }
 
 pub fn extract_user(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
@@ -174,7 +179,7 @@ pub fn extract_user(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
     Ok(AuthUser {
         id: claims.sub,
         email: claims.email,
-        role: claims.role,
+        role: parse_enum(&claims.role, UserRole::Tenant),
         name: claims.name,
     })
 }
@@ -185,7 +190,7 @@ pub fn require_auth(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
 
 pub fn require_landlord(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
     let user = extract_user(headers)?;
-    if user.role != "landlord" {
+    if user.role != UserRole::Landlord {
         return Err(StatusCode::FORBIDDEN);
     }
     Ok(user)
@@ -196,14 +201,16 @@ pub fn require_landlord(headers: &HeaderMap) -> Result<AuthUser, StatusCode> {
 // ---------------------------------------------------------------------------
 
 fn payment_from_row(row: &rusqlite::Row) -> rusqlite::Result<Payment> {
+    let payment_type_str: String = row.get(3)?;
+    let status_str: String = row.get(6)?;
     Ok(Payment {
         id: row.get(0)?,
         user_id: row.get(1)?,
         amount: row.get(2)?,
-        payment_type: row.get(3)?,
+        payment_type: parse_enum(&payment_type_str, PaymentType::Manual),
         description: row.get(4)?,
         stripe_payment_id: row.get(5)?,
-        status: row.get(6)?,
+        status: parse_enum(&status_str, PaymentStatus::Pending),
         due_date: row.get(7)?,
         paid_date: row.get(8)?,
         created_at: row.get(9)?,
@@ -223,12 +230,13 @@ fn utility_from_row(row: &rusqlite::Row) -> rusqlite::Result<UtilityCharge> {
 }
 
 fn maintenance_from_row(row: &rusqlite::Row) -> rusqlite::Result<MaintenanceRequest> {
+    let status_str: String = row.get(4)?;
     Ok(MaintenanceRequest {
         id: row.get(0)?,
         user_id: row.get(1)?,
         title: row.get(2)?,
         description: row.get(3)?,
-        status: row.get(4)?,
+        status: parse_enum(&status_str, MaintenanceStatus::Submitted),
         photo_path: row.get(5)?,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
@@ -236,6 +244,7 @@ fn maintenance_from_row(row: &rusqlite::Row) -> rusqlite::Result<MaintenanceRequ
 }
 
 fn applicant_from_row(row: &rusqlite::Row) -> rusqlite::Result<Applicant> {
+    let status_str: String = row.get(6)?;
     Ok(Applicant {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -243,7 +252,7 @@ fn applicant_from_row(row: &rusqlite::Row) -> rusqlite::Result<Applicant> {
         phone: row.get(3)?,
         desired_move_in: row.get(4)?,
         message: row.get(5)?,
-        status: row.get(6)?,
+        status: parse_enum(&status_str, ApplicantStatus::New),
         notes: row.get(7)?,
         created_at: row.get(8)?,
     })
@@ -336,7 +345,13 @@ pub fn api_router() -> Router {
     let tenant_routes = Router::new()
         .route("/dashboard", get(tenant_dashboard))
         .route("/payments", get(tenant_payments))
-        .route("/utilities", get(tenant_utilities));
+        .route("/utilities", get(tenant_utilities))
+        .route("/lease", get(tenant_get_lease))
+        .route("/lease/sign", post(tenant_sign_lease));
+
+    let admin_lease_routes = Router::new()
+        .route("/", get(admin_list_leases).post(admin_create_lease))
+        .route("/{id}/sign", post(admin_sign_lease));
 
     let admin_tenant_routes = Router::new()
         .route("/", get(admin_list_tenants).post(admin_create_tenant))
@@ -357,7 +372,8 @@ pub fn api_router() -> Router {
         .route("/utilities", post(admin_create_utility))
         .nest("/tenants", admin_tenant_routes)
         .nest("/applicants", admin_applicant_routes)
-        .nest("/reports", admin_report_routes);
+        .nest("/reports", admin_report_routes)
+        .nest("/leases", admin_lease_routes);
 
     let maintenance_routes = Router::new()
         .route("/", get(list_maintenance).post(create_maintenance))
@@ -384,7 +400,8 @@ pub fn api_router() -> Router {
         .route("/move-in-checklist", get(pdf_move_in_checklist))
         .route("/lead-paint-disclosure", get(pdf_lead_paint_disclosure))
         .route("/deposit-receipt", get(pdf_deposit_receipt))
-        .route("/payment-receipt/{payment_id}", get(pdf_payment_receipt));
+        .route("/payment-receipt/{payment_id}", get(pdf_payment_receipt))
+        .route("/lease/{lease_id}", get(pdf_lease));
 
     Router::new()
         .nest("/auth", auth_routes)
@@ -506,6 +523,12 @@ async fn login(Json(body): Json<LoginRequest>) -> Result<impl IntoResponse, impl
     // Successful login — clear rate limit counter
     clear_login_attempts(&rate_limit_key);
 
+    // Clean up expired sessions periodically (piggyback on login)
+    {
+        let db = get_db();
+        let _ = db.execute("DELETE FROM sessions WHERE expires_at < datetime('now')", []);
+    }
+
     let token = auth::generate_token(&id, &email, &role, &name)
         .map_err(|_| validation_error("", "Internal server error"))?;
 
@@ -514,7 +537,7 @@ async fn login(Json(body): Json<LoginRequest>) -> Result<impl IntoResponse, impl
     let user = User {
         id,
         email,
-        role,
+        role: parse_enum(&role, UserRole::Tenant),
         name,
     };
 
@@ -529,7 +552,17 @@ async fn login(Json(body): Json<LoginRequest>) -> Result<impl IntoResponse, impl
     Ok((headers, Json(response)))
 }
 
-async fn logout() -> impl IntoResponse {
+async fn logout(req_headers: HeaderMap) -> impl IntoResponse {
+    // Extract token from cookie and delete the session
+    if let Some(cookie_header) = req_headers.get("cookie").and_then(|v| v.to_str().ok()) {
+        if let Some(token) = cookie_header.split(';').find_map(|s| s.trim().strip_prefix("token=")) {
+            if let Ok(claims) = auth::validate_token(token) {
+                let db = get_db();
+                let _ = db.execute("DELETE FROM sessions WHERE user_id = ?1", rusqlite::params![claims.sub]);
+            }
+        }
+    }
+
     let mut headers = HeaderMap::new();
     headers.insert(
         SET_COOKIE,
@@ -1376,7 +1409,7 @@ async fn list_maintenance(
     let mut where_clauses: Vec<String> = vec![];
     let mut bind_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
 
-    if user.role != "landlord" {
+    if user.role != UserRole::Landlord {
         where_clauses.push(format!("user_id = ?{}", bind_params.len() + 1));
         bind_params.push(Box::new(user.id.clone()) as Box<dyn rusqlite::types::ToSql>);
     }
@@ -1474,7 +1507,7 @@ async fn create_maintenance(
         user_id: user.id,
         title,
         description,
-        status: "submitted".to_string(),
+        status: MaintenanceStatus::Submitted,
         photo_path: None,
         created_at: now.clone(),
         updated_at: now,
@@ -1483,7 +1516,7 @@ async fn create_maintenance(
 
 #[derive(Deserialize)]
 struct UpdateMaintenanceRequest {
-    status: String,
+    status: MaintenanceStatus,
 }
 
 async fn update_maintenance(
@@ -1493,6 +1526,7 @@ async fn update_maintenance(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let _user = require_landlord(&headers)?;
     let now = chrono::Utc::now().to_rfc3339();
+    let status_str = body.status.to_string();
 
     // Single DB lock for both the update and the email lookup
     let email_info = {
@@ -1500,7 +1534,7 @@ async fn update_maintenance(
         let rows = db
             .execute(
                 "UPDATE maintenance_requests SET status = ?1, updated_at = ?2 WHERE id = ?3",
-                rusqlite::params![body.status, now, id],
+                rusqlite::params![status_str, now, id],
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -1520,7 +1554,7 @@ async fn update_maintenance(
 
     // Send maintenance update email (non-blocking)
     if let Some((tenant_email, title)) = email_info {
-        let status = body.status.clone();
+        let status = status_str.clone();
         tokio::spawn(async move {
             if let Err(e) =
                 email::send_maintenance_update(&tenant_email, &title, &status).await
@@ -1530,7 +1564,7 @@ async fn update_maintenance(
         });
     }
 
-    Ok(Json(serde_json::json!({ "id": id, "status": body.status })))
+    Ok(Json(serde_json::json!({ "id": id, "status": status_str })))
 }
 
 // ---------------------------------------------------------------------------
@@ -2052,81 +2086,87 @@ async fn pdf_move_in_checklist(
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
     let _user = require_auth(&headers)?;
-    let db = get_db();
 
-    // Fetch most recent checklist
-    let checklist_row = db
-        .query_row(
-            "SELECT id, property_address, tenant_name, landlord_name, move_in_date, tenant_signed, landlord_signed, created_at
-             FROM move_in_checklists ORDER BY created_at DESC LIMIT 1",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, bool>(5)?,
-                    row.get::<_, bool>(6)?,
-                    row.get::<_, String>(7)?,
-                ))
-            },
-        )
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let json_data = {
+        let db = get_db();
 
-    let (id, address, tenant, landlord, date, t_signed, l_signed, created) = checklist_row;
+        // Fetch most recent checklist
+        let checklist_row = db
+            .query_row(
+                "SELECT id, property_address, tenant_name, landlord_name, move_in_date, tenant_signed, landlord_signed, created_at
+                 FROM move_in_checklists ORDER BY created_at DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, bool>(5)?,
+                        row.get::<_, bool>(6)?,
+                        row.get::<_, String>(7)?,
+                    ))
+                },
+            )
+            .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    let mut stmt = db
-        .prepare(
-            "SELECT id, room, item, condition, notes, photo_path, created_at
-             FROM checklist_items WHERE checklist_id = ?1 ORDER BY rowid ASC",
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let (id, address, tenant, landlord, date, t_signed, l_signed, created) = checklist_row;
 
-    let items: Vec<ChecklistItem> = stmt
-        .query_map(rusqlite::params![id], |row| {
-            Ok(ChecklistItem {
-                id: row.get(0)?,
-                room: row.get(1)?,
-                item: row.get(2)?,
-                condition: row.get(3)?,
-                notes: row.get(4)?,
-                photo_path: row.get(5)?,
-                created_at: row.get(6)?,
+        let mut stmt = db
+            .prepare(
+                "SELECT id, room, item, condition, notes, photo_path, created_at
+                 FROM checklist_items WHERE checklist_id = ?1 ORDER BY rowid ASC",
+            )
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let items: Vec<ChecklistItem> = stmt
+            .query_map(rusqlite::params![id], |row| {
+                Ok(ChecklistItem {
+                    id: row.get(0)?,
+                    room: row.get(1)?,
+                    item: row.get(2)?,
+                    condition: row.get(3)?,
+                    notes: row.get(4)?,
+                    photo_path: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
             })
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .filter_map(|r| r.ok())
-        .collect();
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .filter_map(|r| r.ok())
+            .collect();
 
-    let mut room_map: std::collections::BTreeMap<String, Vec<ChecklistItem>> =
-        std::collections::BTreeMap::new();
-    for item in items {
-        room_map.entry(item.room.clone()).or_default().push(item);
-    }
-    let rooms: Vec<ChecklistRoom> = room_map
-        .into_iter()
-        .map(|(name, items)| ChecklistRoom { name, items })
-        .collect();
+        let mut room_map: std::collections::BTreeMap<String, Vec<ChecklistItem>> =
+            std::collections::BTreeMap::new();
+        for item in items {
+            room_map.entry(item.room.clone()).or_default().push(item);
+        }
+        let rooms: Vec<ChecklistRoom> = room_map
+            .into_iter()
+            .map(|(name, items)| ChecklistRoom { name, items })
+            .collect();
 
-    let checklist = MoveInChecklist {
-        id,
-        property_address: address,
-        tenant_name: tenant,
-        landlord_name: landlord,
-        move_in_date: date,
-        tenant_signed: t_signed,
-        landlord_signed: l_signed,
-        rooms,
-        created_at: created,
+        let checklist = MoveInChecklist {
+            id,
+            property_address: address,
+            tenant_name: tenant,
+            landlord_name: landlord,
+            move_in_date: date,
+            tenant_signed: t_signed,
+            landlord_signed: l_signed,
+            rooms,
+            created_at: created,
+        };
+
+        serde_json::to_string(&checklist).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
-    let json_data =
-        serde_json::to_string(&checklist).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let data = pdf::generate_move_in_checklist_pdf(&json_data)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let data = tokio::task::spawn_blocking(move || {
+        pdf::generate_move_in_checklist_pdf(&json_data)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(pdf_response("move-in-checklist.pdf", data))
 }
@@ -2135,10 +2175,10 @@ async fn pdf_lead_paint_disclosure(
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
     let _user = require_auth(&headers)?;
-    let db = get_db();
 
-    let row = db
-        .query_row(
+    let (property_address, year_built, landlord_name, tenant_name) = {
+        let db = get_db();
+        db.query_row(
             "SELECT property_address, year_built, landlord_name, tenant_name
              FROM lead_paint_disclosures ORDER BY created_at DESC LIMIT 1",
             [],
@@ -2151,16 +2191,19 @@ async fn pdf_lead_paint_disclosure(
                 ))
             },
         )
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| StatusCode::NOT_FOUND)?
+    };
 
-    let (property_address, year_built, landlord_name, tenant_name) = row;
-
-    let data = pdf::generate_lead_paint_disclosure_pdf(
-        &property_address,
-        year_built,
-        &landlord_name,
-        &tenant_name,
-    )
+    let data = tokio::task::spawn_blocking(move || {
+        pdf::generate_lead_paint_disclosure_pdf(
+            &property_address,
+            year_built,
+            &landlord_name,
+            &tenant_name,
+        )
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(pdf_response("lead-paint-disclosure.pdf", data))
@@ -2170,10 +2213,10 @@ async fn pdf_deposit_receipt(
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
     let _user = require_auth(&headers)?;
-    let db = get_db();
 
-    let row = db
-        .query_row(
+    let (tenant_name, amount, deposit_type, depository, date) = {
+        let db = get_db();
+        db.query_row(
             "SELECT tenant_name, deposit_amount, deposit_type, depository_name, date_received
              FROM deposit_receipts ORDER BY created_at DESC LIMIT 1",
             [],
@@ -2187,13 +2230,15 @@ async fn pdf_deposit_receipt(
                 ))
             },
         )
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| StatusCode::NOT_FOUND)?
+    };
 
-    let (tenant_name, amount, deposit_type, depository, date) = row;
-
-    let data =
+    let data = tokio::task::spawn_blocking(move || {
         pdf::generate_deposit_receipt_pdf(&tenant_name, amount, &deposit_type, &depository, &date)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(pdf_response("deposit-receipt.pdf", data))
 }
@@ -2203,35 +2248,41 @@ async fn pdf_payment_receipt(
     Path(payment_id): Path<String>,
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
     let _user = require_auth(&headers)?;
-    let db = get_db();
 
-    let row = db
-        .query_row(
-            "SELECT p.amount, p.payment_type, p.description, p.paid_date, p.created_at, u.name
-             FROM payments p
-             JOIN users u ON p.user_id = u.id
-             WHERE p.id = ?1",
-            rusqlite::params![payment_id],
-            |row| {
-                Ok((
-                    row.get::<_, f64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            },
-        )
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let (amount, payment_type, date, desc, tenant_name) = {
+        let db = get_db();
+        let row = db
+            .query_row(
+                "SELECT p.amount, p.payment_type, p.description, p.paid_date, p.created_at, u.name
+                 FROM payments p
+                 JOIN users u ON p.user_id = u.id
+                 WHERE p.id = ?1",
+                rusqlite::params![payment_id],
+                |row| {
+                    Ok((
+                        row.get::<_, f64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    let (amount, payment_type, description, paid_date, created_at, tenant_name) = row;
-    let date = paid_date.unwrap_or(created_at);
-    let desc = description.unwrap_or_default();
+        let (amount, payment_type, description, paid_date, created_at, tenant_name) = row;
+        let date = paid_date.unwrap_or(created_at);
+        let desc = description.unwrap_or_default();
+        (amount, payment_type, date, desc, tenant_name)
+    };
 
-    let data =
+    let data = tokio::task::spawn_blocking(move || {
         pdf::generate_payment_receipt_pdf(&tenant_name, amount, &payment_type, &date, &desc)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(pdf_response(
         &format!("payment-receipt-{}.pdf", payment_id),
@@ -2341,16 +2392,18 @@ async fn admin_update_applicant(
     // Combine status and notes into a single UPDATE to avoid non-transactional split
     match (&body.status, &body.notes) {
         (Some(status), Some(notes)) => {
+            let status_str = status.to_string();
             db.execute(
                 "UPDATE applicants SET status = ?1, notes = ?2 WHERE id = ?3",
-                rusqlite::params![status, notes, id],
+                rusqlite::params![status_str, notes, id],
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         }
         (Some(status), None) => {
+            let status_str = status.to_string();
             db.execute(
                 "UPDATE applicants SET status = ?1 WHERE id = ?2",
-                rusqlite::params![status, id],
+                rusqlite::params![status_str, id],
             )
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         }
@@ -2384,3 +2437,306 @@ async fn admin_delete_applicant(
 
     Ok(Json(serde_json::json!({"message": "Applicant deleted"})))
 }
+
+// ---------------------------------------------------------------------------
+// Lease Handlers
+// ---------------------------------------------------------------------------
+
+async fn tenant_get_lease(
+    headers: HeaderMap,
+) -> Result<Json<Option<mason_wheeler_shared::LeaseAgreement>>, StatusCode> {
+    let user = extract_user(&headers)?;
+    let db = crate::db::get_db();
+
+    let lease = db
+        .query_row(
+            "SELECT id, tenant_id, document_id, status, rent_amount, lease_start, lease_end,
+                    tenant_signed_name, tenant_signed_at, landlord_signed_name, landlord_signed_at,
+                    created_at
+             FROM leases WHERE tenant_id = ?1",
+            rusqlite::params![user.id],
+            |row| {
+                Ok(mason_wheeler_shared::LeaseAgreement {
+                    id: row.get(0)?,
+                    tenant_id: row.get(1)?,
+                    document_id: row.get(2)?,
+                    status: row.get(3)?,
+                    rent_amount: row.get(4)?,
+                    lease_start: row.get(5)?,
+                    lease_end: row.get(6)?,
+                    tenant_signed_name: row.get(7)?,
+                    tenant_signed_at: row.get(8)?,
+                    landlord_signed_name: row.get(9)?,
+                    landlord_signed_at: row.get(10)?,
+                    created_at: row.get(11)?,
+                })
+            },
+        )
+        .ok();
+
+    Ok(Json(lease))
+}
+
+async fn tenant_sign_lease(
+    headers: HeaderMap,
+    Json(body): Json<mason_wheeler_shared::SignLeaseRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user = extract_user(&headers)?;
+    let db = crate::db::get_db();
+
+    // Verify the lease belongs to this tenant and is in a signable state
+    let lease_tenant_id: String = db
+        .query_row(
+            "SELECT tenant_id FROM leases WHERE id = ?1 AND status IN ('pending', 'sent')",
+            rusqlite::params![body.lease_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    if lease_tenant_id != user.id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let name = sanitize_input(&body.full_legal_name);
+    if name.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Get IP from headers
+    let ip = headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    db.execute(
+        "UPDATE leases SET status = 'signed_by_tenant', tenant_signed_name = ?1,
+         tenant_signed_at = ?2, tenant_signed_ip = ?3 WHERE id = ?4",
+        rusqlite::params![name, now, ip, body.lease_id],
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Also record in signatures table for audit trail
+    let sig_id = uuid::Uuid::new_v4().to_string();
+    db.execute(
+        "INSERT INTO signatures (id, document_type, document_id, signer_role, signer_name, signature_path, signed_at)
+         VALUES (?1, 'lease', ?2, 'tenant', ?3, ?4, ?5)",
+        rusqlite::params![sig_id, body.lease_id, name, format!("typed:{}", name), now],
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tracing::info!("Tenant {} signed lease {} as '{}'", user.id, body.lease_id, name);
+
+    Ok(Json(serde_json::json!({
+        "status": "signed_by_tenant",
+        "signed_at": now,
+        "signed_name": name,
+    })))
+}
+
+async fn admin_list_leases(
+    headers: HeaderMap,
+) -> Result<Json<Vec<mason_wheeler_shared::LeaseAgreement>>, StatusCode> {
+    let user = require_landlord(&headers)?;
+
+    let db = crate::db::get_db();
+    let mut stmt = db
+        .prepare(
+            "SELECT id, tenant_id, document_id, status, rent_amount, lease_start, lease_end,
+                    tenant_signed_name, tenant_signed_at, landlord_signed_name, landlord_signed_at,
+                    created_at
+             FROM leases ORDER BY created_at DESC",
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let leases = stmt
+        .query_map([], |row| {
+            Ok(mason_wheeler_shared::LeaseAgreement {
+                id: row.get(0)?,
+                tenant_id: row.get(1)?,
+                document_id: row.get(2)?,
+                status: row.get(3)?,
+                rent_amount: row.get(4)?,
+                lease_start: row.get(5)?,
+                lease_end: row.get(6)?,
+                tenant_signed_name: row.get(7)?,
+                tenant_signed_at: row.get(8)?,
+                landlord_signed_name: row.get(9)?,
+                landlord_signed_at: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(Json(leases))
+}
+
+async fn admin_create_lease(
+    headers: HeaderMap,
+    Json(body): Json<mason_wheeler_shared::CreateLeaseRequest>,
+) -> Result<Json<mason_wheeler_shared::LeaseAgreement>, StatusCode> {
+    let user = require_landlord(&headers)?;
+
+    let db = crate::db::get_db();
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    db.execute(
+        "INSERT INTO leases (id, tenant_id, status, rent_amount, lease_start, lease_end, created_at)
+         VALUES (?1, ?2, 'sent', ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, body.tenant_id, body.rent_amount, body.lease_start, body.lease_end, now],
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(mason_wheeler_shared::LeaseAgreement {
+        id,
+        tenant_id: body.tenant_id,
+        document_id: None,
+        status: "sent".to_string(),
+        rent_amount: body.rent_amount,
+        lease_start: Some(body.lease_start),
+        lease_end: Some(body.lease_end),
+        tenant_signed_name: None,
+        tenant_signed_at: None,
+        landlord_signed_name: None,
+        landlord_signed_at: None,
+        created_at: now,
+    }))
+}
+
+async fn admin_sign_lease(
+    headers: HeaderMap,
+    axum::extract::Path(lease_id): axum::extract::Path<String>,
+    Json(body): Json<mason_wheeler_shared::SignLeaseRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user = require_landlord(&headers)?;
+
+    let db = crate::db::get_db();
+
+    // Must be signed by tenant first
+    let status: String = db
+        .query_row(
+            "SELECT status FROM leases WHERE id = ?1",
+            rusqlite::params![lease_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    if status != "signed_by_tenant" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let name = sanitize_input(&body.full_legal_name);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    db.execute(
+        "UPDATE leases SET status = 'executed', landlord_signed_name = ?1, landlord_signed_at = ?2 WHERE id = ?3",
+        rusqlite::params![name, now, lease_id],
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Audit trail
+    let sig_id = uuid::Uuid::new_v4().to_string();
+    db.execute(
+        "INSERT INTO signatures (id, document_type, document_id, signer_role, signer_name, signature_path, signed_at)
+         VALUES (?1, 'lease', ?2, 'landlord', ?3, ?4, ?5)",
+        rusqlite::params![sig_id, lease_id, name, format!("typed:{}", name), now],
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tracing::info!("Landlord countersigned lease {}", lease_id);
+
+    Ok(Json(serde_json::json!({
+        "status": "executed",
+        "signed_at": now,
+    })))
+}
+
+async fn pdf_lease(
+    headers: HeaderMap,
+    axum::extract::Path(lease_id): axum::extract::Path<String>,
+) -> Result<(HeaderMap, Vec<u8>), StatusCode> {
+    let user = extract_user(&headers)?;
+
+    let db = crate::db::get_db();
+    let lease: mason_wheeler_shared::LeaseAgreement = db
+        .query_row(
+            "SELECT id, tenant_id, document_id, status, rent_amount, lease_start, lease_end,
+                    tenant_signed_name, tenant_signed_at, landlord_signed_name, landlord_signed_at,
+                    created_at
+             FROM leases WHERE id = ?1",
+            rusqlite::params![lease_id],
+            |row| {
+                Ok(mason_wheeler_shared::LeaseAgreement {
+                    id: row.get(0)?,
+                    tenant_id: row.get(1)?,
+                    document_id: row.get(2)?,
+                    status: row.get(3)?,
+                    rent_amount: row.get(4)?,
+                    lease_start: row.get(5)?,
+                    lease_end: row.get(6)?,
+                    tenant_signed_name: row.get(7)?,
+                    tenant_signed_at: row.get(8)?,
+                    landlord_signed_name: row.get(9)?,
+                    landlord_signed_at: row.get(10)?,
+                    created_at: row.get(11)?,
+                })
+            },
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    // Only the tenant or landlord can view
+    if user.role != UserRole::Landlord && user.id != lease.tenant_id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Get tenant name
+    let tenant_name: String = db
+        .query_row(
+            "SELECT name FROM users WHERE id = ?1",
+            rusqlite::params![lease.tenant_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "Tenant".to_string());
+
+    let landlord_address = std::env::var("LANDLORD_MAILING_ADDRESS")
+        .unwrap_or_else(|_| "8404 12th Ave S, Seattle, WA 98108".to_string());
+
+    let params = crate::pdf::LeaseParams {
+        landlord_name: "Mason Wheeler".to_string(),
+        landlord_address,
+        tenant_names: vec![tenant_name],
+        rent_amount: lease.rent_amount,
+        security_deposit: lease.rent_amount, // Seattle: max one month
+        pet_deposit: 0.0,
+        lease_start: lease.lease_start.clone().unwrap_or_default(),
+        lease_end: lease.lease_end.unwrap_or_default(),
+        move_in_date: lease.lease_start.unwrap_or_default(),
+        max_occupants: 4,
+        pets_description: String::new(),
+        rrio_number: String::new(), // TODO: add after RRIO registration
+        depository_name: "Chase Bank".to_string(),
+        depository_address: "Seattle, WA".to_string(),
+    };
+
+    let pdf_bytes = crate::pdf::generate_lease_pdf(&params)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut resp_headers = HeaderMap::new();
+    resp_headers.insert("content-type", "application/pdf".parse().unwrap());
+    resp_headers.insert(
+        "content-disposition",
+        format!("inline; filename=\"lease-{}.pdf\"", lease_id)
+            .parse()
+            .unwrap(),
+    );
+
+    Ok((resp_headers, pdf_bytes))
+}
+
+// Note: require_landlord is defined earlier in this file

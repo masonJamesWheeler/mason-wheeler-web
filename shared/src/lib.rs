@@ -1,5 +1,129 @@
 use serde::{Deserialize, Serialize};
 
+// ---------------------------------------------------------------------------
+// Typed enums (replace stringly-typed fields)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserRole {
+    Landlord,
+    Tenant,
+}
+
+impl std::fmt::Display for UserRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UserRole::Landlord => write!(f, "landlord"),
+            UserRole::Tenant => write!(f, "tenant"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicantStatus {
+    New,
+    Screening,
+    Approved,
+    Denied,
+    LeaseSigned,
+}
+
+impl std::fmt::Display for ApplicantStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApplicantStatus::New => write!(f, "new"),
+            ApplicantStatus::Screening => write!(f, "screening"),
+            ApplicantStatus::Approved => write!(f, "approved"),
+            ApplicantStatus::Denied => write!(f, "denied"),
+            ApplicantStatus::LeaseSigned => write!(f, "lease_signed"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaintenanceStatus {
+    Submitted,
+    InProgress,
+    Completed,
+}
+
+impl std::fmt::Display for MaintenanceStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MaintenanceStatus::Submitted => write!(f, "submitted"),
+            MaintenanceStatus::InProgress => write!(f, "in_progress"),
+            MaintenanceStatus::Completed => write!(f, "completed"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentType {
+    Rent,
+    Utility,
+    Deposit,
+    LateFee,
+    Stripe,
+    Manual,
+}
+
+impl std::fmt::Display for PaymentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PaymentType::Rent => write!(f, "rent"),
+            PaymentType::Utility => write!(f, "utility"),
+            PaymentType::Deposit => write!(f, "deposit"),
+            PaymentType::LateFee => write!(f, "late_fee"),
+            PaymentType::Stripe => write!(f, "stripe"),
+            PaymentType::Manual => write!(f, "manual"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentStatus {
+    Pending,
+    Completed,
+    Failed,
+}
+
+impl std::fmt::Display for PaymentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PaymentStatus::Pending => write!(f, "pending"),
+            PaymentStatus::Completed => write!(f, "completed"),
+            PaymentStatus::Failed => write!(f, "failed"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DepositType {
+    Security,
+    Pet,
+    LastMonth,
+}
+
+impl std::fmt::Display for DepositType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DepositType::Security => write!(f, "security"),
+            DepositType::Pet => write!(f, "pet"),
+            DepositType::LastMonth => write!(f, "last_month"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared data structures
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaginatedResponse<T> {
     pub items: Vec<T>,
@@ -32,7 +156,7 @@ pub struct Property {
 pub struct User {
     pub id: String,
     pub email: String,
-    pub role: String,
+    pub role: UserRole,
     pub name: String,
 }
 
@@ -41,10 +165,10 @@ pub struct Payment {
     pub id: String,
     pub user_id: Option<String>,
     pub amount: f64,
-    pub payment_type: String,
+    pub payment_type: PaymentType,
     pub description: Option<String>,
     pub stripe_payment_id: Option<String>,
-    pub status: String,
+    pub status: PaymentStatus,
     pub due_date: Option<String>,
     pub paid_date: Option<String>,
     pub created_at: String,
@@ -67,7 +191,7 @@ pub struct MaintenanceRequest {
     pub user_id: String,
     pub title: String,
     pub description: String,
-    pub status: String,
+    pub status: MaintenanceStatus,
     pub photo_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -207,7 +331,7 @@ pub struct DepositReceipt {
     pub tenant_name: String,
     pub property_address: String,
     pub deposit_amount: f64,
-    pub deposit_type: String, // "security", "pet", "last_month"
+    pub deposit_type: DepositType,
     pub depository_name: String,
     pub depository_address: String,
     pub date_received: String,
@@ -236,7 +360,7 @@ pub struct Applicant {
     pub phone: Option<String>,
     pub desired_move_in: Option<String>,
     pub message: Option<String>,
-    pub status: String,
+    pub status: ApplicantStatus,
     pub notes: Option<String>,
     pub created_at: String,
 }
@@ -252,7 +376,7 @@ pub struct CreateApplicantRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateApplicantRequest {
-    pub status: Option<String>,
+    pub status: Option<ApplicantStatus>,
     pub notes: Option<String>,
 }
 
@@ -285,4 +409,38 @@ pub struct OverviewReport {
     pub active_tenants: u32,
     pub maintenance_stats: MaintenanceStats,
     pub monthly_revenue: Vec<RevenueMonth>,
+}
+
+// ---------------------------------------------------------------------------
+// Lease Agreement
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaseAgreement {
+    pub id: String,
+    pub tenant_id: String,
+    pub document_id: Option<String>,
+    pub status: String, // pending, sent, signed_by_tenant, executed, expired
+    pub rent_amount: f64,
+    pub lease_start: Option<String>,
+    pub lease_end: Option<String>,
+    pub tenant_signed_name: Option<String>,
+    pub tenant_signed_at: Option<String>,
+    pub landlord_signed_name: Option<String>,
+    pub landlord_signed_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignLeaseRequest {
+    pub lease_id: String,
+    pub full_legal_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateLeaseRequest {
+    pub tenant_id: String,
+    pub rent_amount: f64,
+    pub lease_start: String,
+    pub lease_end: String,
 }

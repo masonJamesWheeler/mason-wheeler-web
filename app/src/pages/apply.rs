@@ -98,7 +98,6 @@ pub fn ApplyPage() -> impl IntoView {
 
                 <Show when=move || !success.get()>
                     <div class="rounded-xl border border-stone-200 bg-white p-6 sm:p-8 shadow-sm">
-                        // Error message
                         <Show when=move || error.get().is_some()>
                             <div class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                                 {move || error.get().unwrap_or_default()}
@@ -107,7 +106,6 @@ pub fn ApplyPage() -> impl IntoView {
 
                         <form on:submit=handle_submit>
                             <div class="space-y-5">
-                                // Name
                                 <div>
                                     <label class=label_class>"Full Name " <span class="text-red-500">"*"</span></label>
                                     <input
@@ -120,7 +118,6 @@ pub fn ApplyPage() -> impl IntoView {
                                     />
                                 </div>
 
-                                // Email
                                 <div>
                                     <label class=label_class>"Email " <span class="text-red-500">"*"</span></label>
                                     <input
@@ -133,7 +130,6 @@ pub fn ApplyPage() -> impl IntoView {
                                     />
                                 </div>
 
-                                // Phone
                                 <div>
                                     <label class=label_class>"Phone"</label>
                                     <input
@@ -145,7 +141,6 @@ pub fn ApplyPage() -> impl IntoView {
                                     />
                                 </div>
 
-                                // Desired move-in date
                                 <div>
                                     <label class=label_class>"Desired Move-in Date"</label>
                                     <input
