@@ -77,6 +77,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/forgot-password") view=|| view! { <PublicLayout><pages::forgot_password::ForgotPasswordPage /></PublicLayout> } />
                 <Route path=path!("/reset-password") view=|| view! { <PublicLayout><pages::reset_password::ResetPasswordPage /></PublicLayout> } />
                 <Route path=path!("/gallery") view=|| view! { <PublicLayout><pages::gallery::GalleryPage /></PublicLayout> } />
+                <Route path=path!("/apply") view=|| view! { <PublicLayout><pages::apply::ApplyPage /></PublicLayout> } />
 
                 // Tenant routes — auth required
                 <Route path=path!("/tenant") view=|| view! { <ProtectedLayout><pages::tenant::dashboard::TenantDashboard /></ProtectedLayout> } />
@@ -91,6 +92,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/admin/maintenance") view=|| view! { <ProtectedLayout><pages::admin::maintenance::AdminMaintenance /></ProtectedLayout> } />
                 <Route path=path!("/admin/tenants") view=|| view! { <ProtectedLayout><pages::admin::tenants::AdminTenants /></ProtectedLayout> } />
                 <Route path=path!("/admin/reports") view=|| view! { <ProtectedLayout><pages::admin::reports::AdminReports /></ProtectedLayout> } />
+                <Route path=path!("/admin/applicants") view=|| view! { <ProtectedLayout><pages::admin::applicants::AdminApplicants /></ProtectedLayout> } />
             </Routes>
         </Router>
     }

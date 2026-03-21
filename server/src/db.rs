@@ -186,6 +186,18 @@ fn create_tables(conn: &Connection) {
             used INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS applicants (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT,
+            desired_move_in TEXT,
+            message TEXT,
+            status TEXT NOT NULL DEFAULT 'new',
+            notes TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
         ",
     )
     .expect("Failed to create tables");

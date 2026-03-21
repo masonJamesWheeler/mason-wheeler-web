@@ -225,6 +225,32 @@ pub struct LandlordContactInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Applicants / Leads
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Applicant {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub phone: Option<String>,
+    pub desired_move_in: Option<String>,
+    pub message: Option<String>,
+    pub status: String,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateApplicantRequest {
+    pub name: String,
+    pub email: String,
+    pub phone: Option<String>,
+    pub desired_move_in: Option<String>,
+    pub message: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Admin Reports
 // ---------------------------------------------------------------------------
 

@@ -333,11 +333,16 @@ pub fn api_router() -> Router {
         .route("/maintenance", get(admin_report_maintenance))
         .route("/overview", get(admin_report_overview));
 
+    let admin_applicant_routes = Router::new()
+        .route("/", get(admin_list_applicants))
+        .route("/{id}", patch(admin_update_applicant).delete(admin_delete_applicant));
+
     let admin_routes = Router::new()
         .route("/dashboard", get(admin_dashboard))
         .route("/payments", get(admin_payments))
         .route("/utilities", post(admin_create_utility))
         .nest("/tenants", admin_tenant_routes)
+        .nest("/applicants", admin_applicant_routes)
         .nest("/reports", admin_report_routes);
 
     let maintenance_routes = Router::new()
@@ -378,6 +383,7 @@ pub fn api_router() -> Router {
         .nest("/signatures", signature_routes)
         .nest("/pdf", pdf_routes)
         .route("/health", get(health_check))
+        .route("/apply", post(public_apply))
 }
 
 // ---------------------------------------------------------------------------
@@ -2200,4 +2206,153 @@ async fn pdf_payment_receipt(
         &format!("payment-receipt-{}.pdf", payment_id),
         data,
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Public apply (no auth)
+// ---------------------------------------------------------------------------
+
+async fn public_apply(
+    Json(body): Json<mason_wheeler_shared::CreateApplicantRequest>,
+) -> impl IntoResponse {
+    let name = sanitize_input(&body.name);
+    let email_raw = body.email.trim().to_string();
+
+    if name.is_empty() {
+        return validation_error("name", "Name is required").into_response();
+    }
+    if email_raw.is_empty() || !email_raw.contains('@') {
+        return validation_error("email", "A valid email is required").into_response();
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let phone = body.phone.as_deref().map(|s| sanitize_input(s));
+    let desired_move_in = body.desired_move_in.as_deref().map(|s| sanitize_input(s));
+    let message = body.message.as_deref().map(|s| sanitize_input(s));
+
+    // DB operation in its own block so MutexGuard is dropped before any .await
+    {
+        let db = get_db();
+        if db.execute(
+            "INSERT INTO applicants (id, name, email, phone, desired_move_in, message) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, name, email_raw, phone, desired_move_in, message],
+        ).is_err() {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to save application"}))).into_response();
+        }
+    }
+
+    // Notify landlord via email
+    let admin_email = std::env::var("ADMIN_EMAIL").unwrap_or_default();
+    if !admin_email.is_empty() {
+        let email_body = format!(
+            "New rental application received:\n\n\
+             Name: {name}\n\
+             Email: {email_raw}\n\
+             Phone: {phone}\n\
+             Desired move-in: {move_in}\n\
+             Message: {msg}\n",
+            phone = phone.as_deref().unwrap_or("N/A"),
+            move_in = desired_move_in.as_deref().unwrap_or("N/A"),
+            msg = message.as_deref().unwrap_or("N/A"),
+        );
+        if let Err(e) = email::send_email(&admin_email, "New Rental Application", &email_body).await {
+            tracing::warn!("Failed to send applicant notification email: {e}");
+        }
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({"message": "Application received"}))).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Admin applicant management
+// ---------------------------------------------------------------------------
+
+async fn admin_list_applicants(headers: HeaderMap) -> Result<Json<Vec<mason_wheeler_shared::Applicant>>, StatusCode> {
+    let _user = require_landlord(&headers)?;
+
+    let db = get_db();
+    let mut stmt = db
+        .prepare("SELECT id, name, email, phone, desired_move_in, message, status, notes, created_at FROM applicants ORDER BY created_at DESC")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let applicants = stmt
+        .query_map([], |row| {
+            Ok(mason_wheeler_shared::Applicant {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                email: row.get(2)?,
+                phone: row.get(3)?,
+                desired_move_in: row.get(4)?,
+                message: row.get(5)?,
+                status: row.get(6)?,
+                notes: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+
+    Ok(Json(applicants))
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateApplicantRequest {
+    status: Option<String>,
+    notes: Option<String>,
+}
+
+async fn admin_update_applicant(
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateApplicantRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let _user = require_landlord(&headers)?;
+
+    let db = get_db();
+
+    // Verify applicant exists
+    let exists: bool = db
+        .prepare("SELECT 1 FROM applicants WHERE id = ?1")
+        .and_then(|mut s| s.exists(rusqlite::params![id]))
+        .unwrap_or(false);
+    if !exists {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    if let Some(ref status) = body.status {
+        db.execute(
+            "UPDATE applicants SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status, id],
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+
+    if let Some(ref notes) = body.notes {
+        db.execute(
+            "UPDATE applicants SET notes = ?1 WHERE id = ?2",
+            rusqlite::params![notes, id],
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+
+    Ok(Json(serde_json::json!({"message": "Applicant updated"})))
+}
+
+async fn admin_delete_applicant(
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let _user = require_landlord(&headers)?;
+
+    let db = get_db();
+    let rows = db
+        .execute("DELETE FROM applicants WHERE id = ?1", rusqlite::params![id])
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if rows == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    Ok(Json(serde_json::json!({"message": "Applicant deleted"})))
 }

@@ -94,6 +94,7 @@ pub fn Header() -> impl IntoView {
                                             <p class="text-sm font-medium text-stone-900">{move || user_name.get()}</p>
                                         </div>
                                         <Show when=move || is_landlord.get()>
+                                            <A href="/admin/applicants" attr:class="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100">"Applications"</A>
                                             <A href="/admin/reports" attr:class="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100">"Reports"</A>
                                             <A href="/admin/tenants" attr:class="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100">"Manage Tenants"</A>
                                         </Show>
