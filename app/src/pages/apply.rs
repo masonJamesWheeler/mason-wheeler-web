@@ -175,16 +175,35 @@ pub fn ApplyPage() -> impl IntoView {
                                     />
                                 </div>
 
-                                // Message
-                                <div>
-                                    <label class=label_class>"About Yourself / Message"</label>
-                                    <textarea
-                                        class=format!("{input_class} min-h-[120px] resize-y")
-                                        placeholder="Tell us a bit about yourself — employment, number of occupants, pets, etc."
-                                        prop:value=move || message.get()
-                                        on:input=move |ev| set_message.set(event_target_value(&ev))
-                                    />
-                                </div>
+                                // Optional message (collapsed by default)
+                                {
+                                    let (show_message, set_show_message) = signal(false);
+                                    view! {
+                                        <div>
+                                            <Show when=move || !show_message.get()>
+                                                <button
+                                                    type="button"
+                                                    class="text-sm text-stone-500 hover:text-stone-700 transition-colors flex items-center gap-1"
+                                                    on:click=move |_| set_show_message.set(true)
+                                                >
+                                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                                    </svg>
+                                                    "Add a message (optional)"
+                                                </button>
+                                            </Show>
+                                            <Show when=move || show_message.get()>
+                                                <label class=label_class>"About Yourself / Message"</label>
+                                                <textarea
+                                                    class=format!("{input_class} min-h-[100px] resize-y")
+                                                    placeholder="Employment, number of occupants, pets, etc."
+                                                    prop:value=move || message.get()
+                                                    on:input=move |ev| set_message.set(event_target_value(&ev))
+                                                />
+                                            </Show>
+                                        </div>
+                                    }
+                                }
                             </div>
 
                             <div class="mt-8">
